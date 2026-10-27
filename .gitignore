@@ -22,3 +22,8 @@ test/
 Thumbs.db
 .idea/
 .vscode/
+
+# local-only docs (must not be published)
+开源项目隐私保护说明.md
+开源说明.md
+发布说明.md
