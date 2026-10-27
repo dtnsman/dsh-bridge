@@ -90,4 +90,4 @@ release/  Android 应用安装包（DSH-Hosts.apk）
 
 ## 许可证
 
-[MIT](LICENSE)
+[GPL-3.0](LICENSE)
