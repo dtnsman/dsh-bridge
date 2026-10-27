@@ -1,0 +1,21 @@
+{
+  "name": "dsh-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "main": "src/index.js",
+  "bin": {
+    "dsh-bridge": "bin/dsh-bridge.js"
+  },
+  "scripts": {
+    "start": "node bin/dsh-bridge.js",
+    "check": "node bin/dsh-bridge.js --check",
+    "dev":   "DSH_BRIDGE_VERBOSE=1 node bin/dsh-bridge.js --no-tunnel"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

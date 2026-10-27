@@ -1,0 +1,3587 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>DSH Bridge</title>
+<script src="marked.min.js"></script>
+<style>
+  :root {
+    --bg: #1e1e1e; --panel: #252526; --panel2: #2d2d30; --border: #3c3c3c;
+    --text: #ddd; --text2: #999; --accent: #4a9eff; --green: #4ec9b0;
+    --yellow: #dcdcaa; --red: #f48771; --purple: #c586c0;
+  }
+  * { box-sizing: border-box; }
+  html { height: 100%; overflow: hidden; overscroll-behavior: none; -webkit-text-size-adjust: 100%; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 14px; }
+  body {
+    position: fixed; inset: 0; width: 100%; height: 100%; height: 100dvh;
+    display: flex; overflow: hidden; overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+
+  /* 左侧边栏 */
+  .sidebar { width: 320px; min-width: 320px; height: 100%; min-height: 0; overflow: hidden; background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+  .sidebar-header { padding: 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .sidebar-header h1 { font-size: 15px; margin: 0; flex: 1; font-weight: 600; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); transition: background 0.3s; }
+  .status-dot.on { background: var(--green); }
+  .new-btn { margin: 8px 12px; padding: 10px; background: var(--accent); color: #fff; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; }
+  .new-btn:hover { opacity: 0.9; }
+
+  .task-list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 0; -webkit-overflow-scrolling: touch; }
+  .task-item { padding: 10px 12px; border-bottom: 1px solid var(--border); cursor: pointer; transition: background 0.15s; }
+  .task-item:hover { background: var(--panel2); }
+  .task-item.active { background: var(--panel2); border-left: 3px solid var(--accent); }
+  .task-title { font-weight: 500; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .task-meta { font-size: 11px; color: var(--text2); display: flex; align-items: center; gap: 6px; }
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 10px; font-size: 10px; font-weight: 600; text-transform: uppercase; }
+  .badge.running { background: rgba(74,158,255,.2); color: var(--accent); }
+  .badge.idle { background: rgba(153,153,153,.15); color: var(--text2); }
+  .badge.waiting-approval { background: rgba(220,220,170,.2); color: var(--yellow); }
+  .badge.done { background: rgba(78,201,176,.2); color: var(--green); }
+  .badge.failed { background: rgba(244,135,113,.2); color: var(--red); }
+  .badge.cancelled { background: rgba(153,153,153,.15); color: var(--text2); }
+  .badge.removed { background: rgba(153,153,153,.1); color: var(--text2); opacity: 0.5; }
+  .badge.unknown { background: rgba(153,153,153,.1); color: var(--text2); }
+
+  .ws-group { margin-bottom: 4px; }
+  .ws-title { padding: 8px 12px 4px; font-size: 11px; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
+  .ws-title .count { background: var(--panel2); padding: 0 6px; border-radius: 8px; font-size: 10px; }
+
+  /* 主聊天区 */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; overflow: hidden; background: var(--bg); }
+  .main-header { flex: 0 0 auto; padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; background: var(--panel); }
+  .main-header .title { flex: 1; font-weight: 600; }
+  .main-header .sid { font-family: monospace; font-size: 11px; color: var(--text2); }
+  .main-header button { padding: 6px 12px; background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-size: 12px; cursor: pointer; }
+  .main-header button:hover { background: var(--border); }
+  .main-header button.danger { color: var(--red); }
+
+  .messages { flex: 1; min-height: 0; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; touch-action: pan-y; }
+  .empty { color: var(--text2); text-align: center; margin: auto; font-size: 13px; }
+
+  /* 历史分页：顶部“加载更早消息” */
+  .history-more { display: flex; justify-content: center; padding: 0 0 4px; }
+  .history-more button {
+    padding: 6px 14px; background: var(--panel2); color: var(--text2);
+    border: 1px solid var(--border); border-radius: 999px;
+    font-size: 12px; cursor: pointer; transition: background .15s, color .15s;
+  }
+  .history-more button:hover:not(:disabled) { background: var(--border); color: var(--text); }
+  .history-more button:disabled { opacity: .6; cursor: wait; }
+  
+  /* 气泡基础样式 */
+  .msg { max-width: 90%; padding: 10px 14px; border-radius: 8px; line-height: 1.6; word-break: break-word; font-size: 13px; }
+  .msg.assistant p { margin: 0 0 8px 0; }
+  .msg.assistant p:last-child { margin: 0; }
+  .msg.assistant pre { background: var(--bg); padding: 10px; border-radius: 6px; overflow-x: auto; font-family: monospace; font-size: 12px; }
+  .msg.assistant code { background: rgba(255,255,255,0.1); padding: 2px 4px; border-radius: 4px; font-family: monospace; }
+  .msg.assistant pre code { background: transparent; padding: 0; }
+  .msg.assistant ul, .msg.assistant ol { margin: 4px 0; padding-left: 20px; }
+  .msg.assistant blockquote { margin: 8px 0; padding-left: 10px; border-left: 3px solid var(--border); color: var(--text2); }
+
+  .msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
+  .msg.user p { margin: 0; }
+  .msg.user.pending { opacity: .65; }
+  .msg.assistant { align-self: flex-start; background: var(--panel2); }
+  .msg-body { min-width: 0; }
+  .msg-actions {
+    display: flex; gap: 6px; justify-content: flex-end;
+    margin-top: 7px; padding-top: 6px;
+    border-top: 1px solid rgba(255,255,255,.08);
+    opacity: 0; transition: opacity .15s;
+  }
+  .msg.assistant:hover .msg-actions,
+  .msg-actions:focus-within { opacity: 1; }
+  .msg-action {
+    padding: 3px 8px; border: 1px solid var(--border); border-radius: 5px;
+    background: transparent; color: var(--text2); font-size: 11px;
+    line-height: 1.4; cursor: pointer; transition: background .15s, color .15s;
+  }
+  .msg-action:hover:not(:disabled) { background: var(--border); color: var(--text); }
+  .msg-action:disabled { opacity: .45; cursor: not-allowed; }
+  @media (hover: none) {
+    .msg-actions { opacity: 1; }
+  }
+
+  /* 消息内图片 */
+  .msg-images { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .msg-image {
+    position: relative; display: flex; align-items: center; justify-content: center;
+    min-width: 64px; min-height: 64px; max-width: 240px; max-height: 240px;
+    padding: 0; border: 1px solid rgba(255,255,255,.18); border-radius: 8px;
+    background: rgba(0,0,0,.18); color: inherit; font-size: 12px; cursor: zoom-in;
+    overflow: hidden;
+  }
+  .msg-image img { display: block; max-width: 240px; max-height: 240px; width: auto; height: auto; object-fit: contain; }
+  .msg-image.loading { min-width: 88px; min-height: 88px; cursor: default; }
+  .msg-image .img-placeholder { padding: 0 10px; opacity: .8; }
+  .msg-image.failed { cursor: default; }
+
+  /* 工具运行状态及输出 */
+  .msg.tool-group { align-self: stretch; max-width: 100%; background: transparent; padding: 0; }
+  .tool-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; background: var(--panel2);
+    border: 1px solid var(--border); border-radius: 6px;
+    cursor: pointer; user-select: none;
+    font-family: monospace; font-size: 13px; color: var(--purple);
+    margin-bottom: 4px; transition: background 0.2s;
+  }
+  .tool-header:hover { background: var(--border); }
+  .tool-title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+  .tool-status { font-size: 11px; color: var(--text2); }
+  .tool-caret { font-size: 11px; color: var(--text2); transition: transform 0.15s; }
+  .tool-group.expanded .tool-caret { transform: rotate(90deg); }
+  
+  .tool-body {
+    display: none;
+    padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: #1a1a1a;
+    font-family: monospace; font-size: 12px;
+    white-space: pre-wrap; color: #bbb;
+    max-height: 400px; overflow-y: auto;
+    margin-bottom: 8px;
+  }
+  .tool-group.expanded .tool-body { display: block; }
+  .tool-group.expanded .tool-status { color: var(--green); }
+
+  .tool-cmd { color: var(--yellow); margin-bottom: 8px; word-break: break-all; }
+  .tool-output { border-top: 1px dashed var(--border); padding-top: 8px; }
+  .tool-output.is-error { color: var(--red); }
+
+  /* 底部输入区与状态栏 */
+  .footer-area { flex: 0 0 auto; border-top: 1px solid var(--border); background: var(--panel); display: flex; flex-direction: column; }
+  
+  .composer-meta { 
+    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;
+    gap: 4px 10px; padding: 6px 16px; font-size: 11px; color: var(--text2); 
+  }
+  .composer-meta-left { display: flex; align-items: center; gap: 10px; }
+  .composer-meta-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; row-gap: 4px; }
+  .stat-cache { color: var(--yellow); }
+  .stat-context { white-space: nowrap; }
+
+  .model-select, .effort-select {
+    background: transparent; color: var(--text2); border: none; font-size: 11px;
+    outline: none; cursor: pointer; appearance: none; padding-right: 10px;
+  }
+  .model-select:hover, .effort-select:hover { color: var(--text); }
+  .effort-select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .composer { padding: 0 16px 12px; display: flex; gap: 8px; align-items: flex-end; }
+  .composer textarea { flex: 1; min-height: 40px; max-height: 200px; padding: 10px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-family: inherit; font-size: 13px; resize: none; outline: none; }
+  .composer textarea:focus { border-color: var(--accent); }
+  .composer .actions { display: flex; gap: 6px; }
+  .composer button { padding: 0 16px; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; height: 40px; font-size: 13px; }
+  .composer button.attach-btn { width: 40px; min-width: 40px; padding: 0; background: var(--panel2); color: var(--text); border: 1px solid var(--border); font-size: 18px; font-weight: 400; }
+  .composer button.mic-btn { width: 40px; min-width: 40px; padding: 0; background: var(--panel2); color: var(--text); border: 1px solid var(--border); font-size: 18px; font-weight: 400; }
+  .composer button.mic-btn.recording { background: var(--red); color: #fff; border-color: var(--red); }
+  .voice-status { display: none; align-items: center; gap: 8px; padding: 4px 16px; font-size: 12px; color: var(--text2); }
+  .voice-status.show { display: flex; }
+  .voice-status span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .voice-status button { flex: none; padding: 2px 8px; background: transparent; color: var(--text2); border: 1px solid var(--border); border-radius: 4px; font-size: 11px; cursor: pointer; }
+  .composer button.steer { background: var(--yellow); color: #000; }
+  .composer button.send { background: var(--accent); color: #fff; }
+  .composer button:disabled { background: var(--border) !important; color: var(--text2) !important; cursor: not-allowed; }
+  .composer-hint { font-size: 10px; color: var(--text2); text-align: right; padding: 0 16px 4px; }
+
+  /* 待发送图片 */
+  .draft-images { display: none; gap: 8px; padding: 0 16px 8px; overflow-x: auto; overscroll-behavior-x: contain; }
+  .draft-images.show { display: flex; }
+  .draft-item { position: relative; flex: 0 0 auto; width: 64px; height: 64px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--bg); }
+  .draft-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .draft-item button {
+    position: absolute; top: 3px; right: 3px; width: 19px; height: 19px; padding: 0;
+    border: none; border-radius: 50%; background: rgba(0,0,0,.72); color: #fff;
+    font-size: 13px; line-height: 19px; text-align: center; cursor: pointer;
+  }
+
+  /* 图片灯箱 */
+  .lightbox { position: fixed; inset: 0; z-index: 300; display: none; align-items: center; justify-content: center; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); background: rgba(0,0,0,.92); }
+  .lightbox.show { display: flex; }
+  .lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+  /* 弹窗 */
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: center; justify-content: center; z-index: 100; }
+  .modal-bg.show { display: flex; }
+  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 20px; width: 90%; max-width: 480px; }
+  .modal h2 { margin: 0 0 16px; font-size: 16px; }
+  .modal label { display: block; margin-bottom: 6px; color: var(--text2); font-size: 12px; }
+  .modal input { width: 100%; padding: 8px 10px; margin-bottom: 12px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-family: inherit; font-size: 13px; outline: none; }
+  .modal textarea { width: 100%; min-height: 220px; padding: 10px; margin-bottom: 12px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; line-height: 1.5; outline: none; resize: vertical; }
+  .modal .actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .modal .actions button { padding: 8px 16px; border-radius: 4px; border: 1px solid var(--border); background: var(--panel2); color: var(--text); font-size: 13px; cursor: pointer; }
+  .modal .actions button.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+
+  /* 模型选择：自定义可滚动弹层（避免移动端原生 select 浮层被裁剪） */
+  .model-select[hidden] { display: none !important; }
+  .model-picker-btn {
+    display: inline-flex; align-items: center; gap: 3px; max-width: 170px; min-width: 0;
+    padding: 0 2px; background: transparent; border: none; color: var(--text2);
+    font-family: inherit; font-size: 11px; cursor: pointer;
+  }
+  .model-picker-btn:hover { color: var(--text); }
+  .model-picker-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .model-picker-caret { flex: none; font-size: 9px; opacity: .7; }
+  .model-picker-bg {
+    position: fixed; inset: 0; z-index: 350; display: none;
+    align-items: center; justify-content: center; padding: 16px;
+    background: rgba(0,0,0,.6);
+  }
+  .model-picker-bg.show { display: flex; }
+  .model-picker-panel {
+    width: 100%; max-width: 520px; max-height: 78vh; max-height: min(78dvh, 680px);
+    display: flex; flex-direction: column; overflow: hidden;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.5);
+  }
+  .model-picker-head {
+    flex: none; display: flex; align-items: flex-start; gap: 10px;
+    padding: 14px 16px; border-bottom: 1px solid var(--border);
+  }
+  .model-picker-head h2 { flex: 1; margin: 0; font-size: 15px; }
+  .model-picker-close {
+    flex: none; padding: 2px 8px; background: transparent; color: var(--text2);
+    border: 1px solid var(--border); border-radius: 4px; font-size: 11px; cursor: pointer;
+  }
+  .model-picker-list {
+    flex: 1 1 auto; min-height: 0; overflow-y: auto;
+    -webkit-overflow-scrolling: touch; overscroll-behavior: contain; touch-action: pan-y;
+    padding: 6px 0 10px;
+  }
+  .model-group-title {
+    padding: 10px 16px 4px; color: var(--text2); font-size: 11px;
+    text-transform: uppercase; letter-spacing: .5px;
+  }
+  .model-option {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 12px 16px; border: none; background: transparent;
+    color: var(--text); font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+  }
+  .model-option:active { background: var(--panel2); }
+  .model-option-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .model-option.selected { color: var(--accent); }
+  .model-check { flex: none; margin-left: auto; font-size: 14px; opacity: 0; }
+  .model-option.selected .model-check { opacity: 1; }
+  .model-empty { padding: 24px 16px; color: var(--text2); text-align: center; font-size: 13px; }
+  .model-picker-footer {
+    flex: none; padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border);
+  }
+  .model-picker-add {
+    width: 100%; padding: 9px 12px; border: 1px dashed var(--border);
+    border-radius: 6px; background: transparent; color: var(--text2);
+    font: inherit; font-size: 13px; cursor: pointer;
+  }
+  .model-picker-add:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* 自定义模型：在模型选择器里创建兼容 OpenAI / Anthropic 协议的提供商 */
+  #customModelModal { z-index: 360; }
+  .custom-model-modal { width: 92%; max-width: 560px; max-height: 90vh; overflow-y: auto; }
+  .custom-model-hint { margin: -6px 0 14px; color: var(--text2); font-size: 12px; line-height: 1.55; }
+  .custom-model-field { margin-bottom: 12px; }
+  .custom-model-field label { margin-bottom: 6px; }
+  .custom-model-field input, .custom-model-field select { margin-bottom: 0; }
+  .custom-model-modal select {
+    width: 100%; padding: 8px 10px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px; font: inherit; font-size: 13px; outline: none;
+  }
+  .custom-model-help { margin-top: 4px; color: var(--text2); font-size: 11px; line-height: 1.45; }
+  .custom-model-models { display: flex; flex-direction: column; gap: 7px; margin-bottom: 8px; }
+  .custom-model-row { display: flex; align-items: center; gap: 6px; }
+  .custom-model-row input { margin-bottom: 0; }
+  .custom-model-row .cm-model-id { flex: 1 1 55%; min-width: 0; }
+  .custom-model-row .cm-model-name { flex: 1 1 45%; min-width: 0; }
+  .custom-model-row .cm-row-remove {
+    flex: none; width: 32px; height: 34px; padding: 0; border: 1px solid var(--border);
+    border-radius: 4px; background: var(--panel2); color: var(--text2); font-size: 16px; cursor: pointer;
+  }
+  .custom-model-row .cm-row-remove:hover { color: var(--danger); border-color: var(--danger); }
+  .custom-model-add {
+    margin-bottom: 12px; padding: 6px 10px; border: 1px dashed var(--border); border-radius: 4px;
+    background: transparent; color: var(--text2); font: inherit; font-size: 12px; cursor: pointer;
+  }
+  .custom-model-add:hover { color: var(--accent); border-color: var(--accent); }
+  .custom-model-error {
+    display: none; margin: 0 0 12px; padding: 8px 10px; border: 1px solid rgba(255,107,107,.45);
+    border-radius: 4px; background: rgba(255,107,107,.08); color: var(--danger);
+    font-size: 12px; line-height: 1.5; white-space: pre-wrap;
+  }
+  .custom-model-error.show { display: block; }
+
+  @media (max-width: 700px) {
+    html, body { height: 100%; height: 100dvh; }
+    /* 工作区路径单独占第一行，避免被右侧统计挤压成 0 宽 */
+    .composer-meta { flex-wrap: wrap; gap: 3px 6px; padding: 6px 10px; }
+    .composer-meta-left { min-width: 0; flex: 1 1 100%; }
+    .composer-meta-left #curCwd { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* 缓存/上下文统计保留；空间不足时换行，不裁剪也不隐藏。 */
+    .composer-meta-right { flex: 1 1 100%; flex-wrap: wrap; gap: 3px 4px; min-width: 0; overflow: visible; justify-content: flex-start; }
+    .model-select { max-width: 120px; min-width: 0; flex: 0 1 auto; text-overflow: ellipsis; }
+    .effort-select { max-width: 72px; min-width: 0; flex: 0 1 auto; }
+    .model-select:focus, .model-select:active { max-width: 100%; flex: 1 1 auto; }
+    .model-picker-btn { max-width: 42vw; }
+    .model-picker-bg { align-items: flex-end; padding: 0; }
+    .model-picker-panel { max-width: 100%; max-height: 82vh; max-height: 82dvh; border-radius: 14px 14px 0 0; border-bottom: none; padding-bottom: env(safe-area-inset-bottom); }
+    .composer-meta-right #statTokens { white-space: nowrap; }
+    .model-select, .effort-select { max-width: 46vw; }
+    .sidebar { width: 100%; min-width: 0; height: 100%; }
+    .sidebar-header { padding-top: calc(12px + env(safe-area-inset-top)); }
+    .main { display: none; height: 100%; }
+    body.showing-main .sidebar { display: none; }
+    body.showing-main .main { display: flex; }
+    .main-header { padding-top: calc(12px + env(safe-area-inset-top)); }
+    .messages { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+    .footer-area { padding-bottom: env(safe-area-inset-bottom); }
+    .composer { gap: 4px; padding-left: calc(8px + env(safe-area-inset-left)); padding-right: calc(8px + env(safe-area-inset-right)); }
+    .composer button.attach-btn, .composer button.mic-btn { width: 34px; min-width: 34px; font-size: 16px; }
+    .composer .actions { gap: 4px; }
+    .composer button.steer, .composer button.send { padding: 0 10px; }
+    .composer textarea { font-size: 16px; }
+    .composer-hint { padding-bottom: calc(4px + env(safe-area-inset-bottom)); }
+    .voice-status { padding-left: calc(10px + env(safe-area-inset-left)); padding-right: calc(10px + env(safe-area-inset-right)); }
+    .draft-images { padding-left: calc(16px + env(safe-area-inset-left)); padding-right: calc(16px + env(safe-area-inset-right)); }
+    #customModelModal { align-items: flex-end; padding: 0; }
+    .custom-model-modal {
+      width: 100%; max-width: 100%; max-height: 92vh; max-height: 92dvh;
+      border-radius: 14px 14px 0 0; border-bottom: none;
+      padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    }
+  }
+
+  /* 多主机管理 */
+  .host-bar { display: flex; gap: 6px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .host-bar select { flex: 1; min-width: 0; padding: 5px 8px; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-size: 12px; outline: none; }
+  .host-bar button { padding: 5px 8px; background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-size: 11px; cursor: pointer; white-space: nowrap; }
+  .host-modal { width: 92%; max-width: 640px; max-height: 86vh; overflow-y: auto; }
+  .host-modal h3 { margin: 4px 0 12px; font-size: 14px; }
+  .host-list { display: flex; flex-direction: column; gap: 8px; max-height: 42vh; overflow-y: auto; margin-bottom: 14px; }
+  .host-empty { padding: 18px 8px; color: var(--text2); text-align: center; font-size: 12px; }
+  .host-item { display: flex; gap: 10px; align-items: flex-start; padding: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
+  .host-item.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .host-main { flex: 1; min-width: 0; }
+  .host-name { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
+  .host-badge { padding: 1px 5px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 9px; font-weight: 500; }
+  .host-url { margin-top: 3px; font-family: monospace; font-size: 11px; color: var(--text2); word-break: break-all; }
+  .host-note { margin-top: 3px; font-size: 11px; color: var(--text2); word-break: break-word; }
+  .host-actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+  .host-actions button, .host-toolbar button { padding: 5px 9px; background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-size: 11px; cursor: pointer; }
+  .host-actions button:disabled { opacity: .5; cursor: default; }
+  .host-actions button.danger { color: var(--danger); }
+  .host-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .host-hint { margin: -4px 0 10px; font-size: 11px; color: var(--text2); line-height: 1.5; }
+  .host-form { margin-top: 10px; padding-top: 14px; border-top: 1px solid var(--border); }
+  @media (max-width: 700px) {
+    .host-bar { padding-top: 0; }
+    .host-modal { width: 94%; max-height: 90vh; }
+    .host-item { flex-direction: column; }
+    .host-actions { justify-content: flex-start; }
+  }
+
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #555; }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="status-dot" id="connDot"></div>
+    <h1>DSH Bridge</h1>
+    <button style="padding:2px 8px;font-size:11px;background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:4px;cursor:pointer" id="refreshBtn">⟳</button>
+  </div>
+  <div class="host-bar">
+    <select id="hostSelect" title="切换 DSH 主机"></select>
+    <button id="hostManageBtn" type="button" title="管理 DSH 主机">主机</button>
+  </div>
+  <button class="new-btn" id="newBtn">+ 新建任务</button>
+  <div class="task-list" id="taskList"><div class="empty">加载中...</div></div>
+</aside>
+
+<main class="main">
+  <div class="main-header">
+    <button id="backBtn" style="display:none">←</button>
+    <div>
+      <div class="title" id="curTitle">未选择任务</div>
+      <div class="sid" id="curSid"></div>
+    </div>
+    <button id="cancelBtn" class="danger" style="display:none">取消任务</button>
+  </div>
+
+  <div class="messages" id="messages"><div class="empty">从左侧选一个任务，或点击"+ 新建任务"</div></div>
+
+  <div class="footer-area">
+    <div class="composer-meta">
+      <div class="composer-meta-left">
+        <span id="curCwd" style="font-family:monospace;font-size:11px;color:var(--text2)" title="工作区路径">无工作区</span>
+      </div>
+      <div class="composer-meta-right">
+        <span id="statTokens">0 tok</span>
+        <span id="statRound">0 轮 · 0 步</span>
+        <span id="statCache" class="stat-cache" style="display:none">缓存命中 --</span>
+        <span id="statContext" class="stat-context" style="display:none" title="上下文占用（点击压缩上下文）" role="button" tabindex="0">◔ --</span>
+        
+        <select class="effort-select" id="effortSelect" title="推理等级" disabled>
+          <option value="">默认等级</option>
+        </select>
+        
+        <button type="button" class="model-picker-btn" id="modelPickerBtn" title="选择模型" aria-haspopup="dialog" aria-controls="modelPickerModal" aria-expanded="false">
+          <span class="model-picker-label" id="modelPickerLabel">加载模型中...</span>
+          <span class="model-picker-caret">▾</span>
+        </button>
+        <select class="model-select" id="modelSelect" hidden aria-hidden="true" tabindex="-1">
+          <option value="">加载模型中...</option>
+        </select>
+      </div>
+    </div>
+    
+    <div class="voice-status" id="voiceStatus"><span id="voiceStatusText"></span><button id="voiceCancelBtn" type="button">取消</button></div>
+    <div class="composer-hint">Enter 排队发送 · Ctrl/Cmd+Enter 打断并发送</div>
+    <div class="draft-images" id="draftImages"></div>
+    <div class="composer">
+      <button id="imageBtn" class="attach-btn" type="button" title="添加图片" aria-label="添加图片">📎</button>
+      <button id="voiceBtn" class="mic-btn" type="button" title="语音输入" aria-label="语音输入">🎤</button>
+      <textarea id="promptInput" placeholder="输入提示词..." rows="1"></textarea>
+      <div class="actions">
+        <button id="steerBtn" class="steer" disabled title="打断当前 turn 并发送（Ctrl/Cmd+Enter）">打断</button>
+        <button id="sendBtn" class="send" disabled title="排队发送（Enter）">发送</button>
+      </div>
+    </div>
+    <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple style="display:none">
+  </div>
+</main>
+
+<div class="modal-bg" id="newModal">
+  <div class="modal">
+    <h2>新建任务</h2>
+    <label>工作目录</label>
+    <input id="newCwd" value="C:\work">
+    <label>提示词</label>
+    <input id="newPrompt" placeholder="例如：检查当前主机的设备状态">
+    <div class="actions">
+      <button id="newCancel">取消</button>
+      <button class="primary" id="newCreate">创建并发送</button>
+    </div>
+  </div>
+</div>
+
+<div class="lightbox" id="lightbox"><img id="lightboxImg" alt=""></div>
+
+<div class="modal-bg" id="hostModal">
+  <div class="modal host-modal">
+    <h2 id="hostModalTitle">DSH 主机管理</h2>
+    <div class="host-list" id="hostList"></div>
+    <div class="host-toolbar">
+      <button id="hostAddBtn" type="button">+ 添加主机</button>
+      <button id="hostImportBtn" type="button">导入</button>
+      <button id="hostExportBtn" type="button">导出</button>
+      <button id="hostPasteImportBtn" type="button">粘贴导入</button>
+      <input id="hostImportInput" type="file" accept=".json,.csv,application/json,text/csv" style="display:none">
+    </div>
+    <div class="host-hint">导入支持 JSON 数组或 <code>{"hosts":[...]}</code>，也支持 CSV：name,endpoint,note；同端点会合并更新。</div>
+    <div class="host-form" id="hostForm" style="display:none">
+      <h3 id="hostFormTitle">添加主机</h3>
+      <label>名称</label>
+      <input id="hostName" placeholder="例如：Linux 生产机" autocomplete="off">
+      <label>API 端点</label>
+      <input id="hostEndpoint" placeholder="http://ai.dsh2...html.dtns.top" autocomplete="off">
+      <label>备注（可选）</label>
+      <input id="hostNote" placeholder="例如：内网、测试环境" autocomplete="off">
+      <div class="actions">
+        <button id="hostFormCancel" type="button">取消</button>
+        <button class="primary" id="hostFormSave" type="button">保存</button>
+      </div>
+    </div>
+    <div class="actions" style="margin-top:14px">
+      <button id="hostCloseBtn" type="button">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="hostPasteModal">
+  <div class="modal host-modal">
+    <h2>粘贴导入主机</h2>
+    <div class="host-hint">直接粘贴 JSON 数组或 <code>{"hosts":[...]}</code>，也支持 CSV：name,endpoint,note。</div>
+    <textarea id="hostPasteText" rows="12" placeholder='[
+  {"name":"Linux 生产机","endpoint":"http://...","note":"主环境"}
+]'></textarea>
+    <div class="actions">
+      <button id="hostPasteCancel" type="button">取消</button>
+      <button id="hostPasteReadBtn" type="button">读剪贴板</button>
+      <button class="primary" id="hostPasteDoBtn" type="button">导入</button>
+    </div>
+  </div>
+</div>
+
+<div class="model-picker-bg" id="modelPickerModal" role="dialog" aria-modal="true" aria-labelledby="modelPickerTitle">
+  <div class="model-picker-panel">
+    <div class="model-picker-head">
+      <h2 id="modelPickerTitle">选择模型</h2>
+      <button class="model-picker-close" id="modelPickerClose" type="button">关闭</button>
+    </div>
+    <div class="model-picker-list" id="modelPickerList"></div>
+    <div class="model-picker-footer">
+      <button type="button" class="model-picker-add" id="modelPickerAddBtn">＋ 添加自定义模型</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="customModelModal">
+  <div class="modal custom-model-modal">
+    <h2>添加自定义模型</h2>
+    <p class="custom-model-hint">添加兼容 OpenAI Chat Completions / Responses 或 Anthropic Messages 协议的接口。创建后会出现在模型选择器中。</p>
+
+    <div class="custom-model-field">
+      <label for="cmProvider">Provider ID *</label>
+      <input id="cmProvider" type="text" placeholder="acme-gateway" autocomplete="off" autocapitalize="off" spellcheck="false">
+      <div class="custom-model-help">小写字母开头，只能包含小写字母、数字和短横线，作为提供商唯一标识。</div>
+    </div>
+
+    <div class="custom-model-field">
+      <label for="cmDisplayName">显示名称</label>
+      <input id="cmDisplayName" type="text" placeholder="例如：Acme Gateway" autocomplete="off">
+    </div>
+
+    <div class="custom-model-field">
+      <label for="cmBaseURL">API 地址 *</label>
+      <input id="cmBaseURL" type="url" placeholder="https://gateway.example/v1" autocomplete="off" spellcheck="false">
+    </div>
+
+    <div class="custom-model-field">
+      <label for="cmProtocol">API 协议</label>
+      <select id="cmProtocol">
+        <option value="openai-completions">OpenAI Chat Completions</option>
+        <option value="openai-responses">OpenAI Responses</option>
+        <option value="anthropic-messages">Anthropic Messages</option>
+      </select>
+    </div>
+
+    <div class="custom-model-field">
+      <label for="cmApiKey">API Key</label>
+      <input id="cmApiKey" type="password" placeholder="sk-..." autocomplete="new-password" spellcheck="false">
+      <div class="custom-model-help">留空则不保存密钥，适用于无鉴权网关或使用环境变量的场景。密钥只写入 DSH 凭据，不保存在浏览器。</div>
+    </div>
+
+    <div class="custom-model-field">
+      <label>模型目录 *</label>
+      <div class="custom-model-models" id="cmModels"></div>
+      <button type="button" class="custom-model-add" id="cmAddModel">+ 添加模型</button>
+    </div>
+
+    <div class="custom-model-error" id="cmError"></div>
+
+    <div class="actions">
+      <button id="cmCancel" type="button">取消</button>
+      <button class="primary" id="cmSave" type="button">创建并添加</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+(function () {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return;
+  const uuid = function () {
+    if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+      return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, (c) => (c ^ (crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4)))).toString(16));
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0; const v = c === 'x' ? r : (r & 0x3) | 0x8; return v.toString(16);
+    });
+  };
+  if (typeof crypto !== 'undefined') { try { crypto.randomUUID = uuid; } catch (e) { window.randomUUID = uuid; } } else { window.crypto = { randomUUID: uuid }; }
+})();
+
+// ============================================================
+// 多主机（DSH Bridge 实例）管理
+// ============================================================
+const HOSTS_KEY = 'dsh-bridge-hosts-v1';
+const CURRENT_HOST_KEY = 'dsh-bridge-current-host-v1';
+
+// 可选：文件内置默认主机。
+// 空数组 = 首次使用仍按原逻辑弹出“先配置主机”弹窗。
+// 非空时首次打开会把默认主机补进列表并选中；用户删除后不会自动加回。
+const DEFAULT_HOSTS = [];
+
+function newHostId() {
+  const c = (typeof crypto !== 'undefined' && crypto) || {};
+  if (typeof c.randomUUID === 'function') return 'h-' + c.randomUUID().replace(/-/g, '').slice(0, 12);
+  return 'h-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+function normalizeEndpoint(raw) {
+  let s = String(raw || '').trim();
+  if (!s) return null;
+  if (!/^https?:\/\//i.test(s)) s = 'http://' + s;
+  try {
+    const u = new URL(s);
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+    u.search = '';
+    u.hash = '';
+    let href = u.href;
+    while (href.endsWith('/')) href = href.slice(0, -1);
+    return href;
+  } catch { return null; }
+}
+
+function hostEndpointName(endpoint) {
+  try { return new URL(endpoint).host; } catch { return endpoint; }
+}
+
+function sanitizeHost(raw, keepId = true) {
+  if (!raw || typeof raw !== 'object') return null;
+  const endpoint = normalizeEndpoint(raw.endpoint || raw.api || raw.url || raw.host || '');
+  if (!endpoint) return null;
+  const name = String(raw.name || raw.title || '').trim() || hostEndpointName(endpoint);
+  const note = String(raw.note || raw.description || '').trim();
+  const id = keepId && typeof raw.id === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(raw.id)
+    ? raw.id : newHostId();
+  return {
+    id,
+    name: name.slice(0, 80),
+    endpoint,
+    note: note.slice(0, 240),
+    createdAt: Number(raw.createdAt) || Date.now(),
+  };
+}
+
+function loadHosts() {
+  let list = [];
+  try {
+    const raw = JSON.parse(localStorage.getItem(HOSTS_KEY) || '[]');
+    if (Array.isArray(raw)) list = raw;
+    else if (raw && Array.isArray(raw.hosts)) list = raw.hosts;
+  } catch {}
+  const out = [];
+  const seenEndpoints = new Set();
+  const seenIds = new Set();
+  for (const item of list) {
+    const h = sanitizeHost(item);
+    if (!h || seenEndpoints.has(h.endpoint)) continue;
+    if (seenIds.has(h.id)) h.id = newHostId();
+    seenEndpoints.add(h.endpoint);
+    seenIds.add(h.id);
+    out.push(h);
+  }
+  return out;
+}
+
+function saveHosts() {
+  try {
+    localStorage.setItem(HOSTS_KEY, JSON.stringify(hosts));
+  } catch (e) {
+    console.warn('保存主机失败:', e);
+  }
+}
+
+function persistCurrentHost() {
+  try {
+    if (currentHostId) localStorage.setItem(CURRENT_HOST_KEY, currentHostId);
+    else localStorage.removeItem(CURRENT_HOST_KEY);
+  } catch {}
+}
+
+const defaultEndpoint = DEFAULT_HOSTS.length
+  ? normalizeEndpoint(DEFAULT_HOSTS[0].endpoint)
+  : null;
+const defaultAppliedKey = DEFAULT_HOSTS.length
+  ? 'dsh-bridge-default-applied-v1:' + (DEFAULT_HOSTS[0].id || 'default')
+  : '';
+
+let hosts = loadHosts();
+let defaultApplied = false;
+try {
+  defaultApplied = !!defaultAppliedKey && localStorage.getItem(defaultAppliedKey) === '1';
+} catch {}
+
+// 首次打开这个变体时，把内置默认主机补进主机列表并优先选中。
+// 用户删除默认主机后，标记仍然存在，不会再次自动加回。
+if (DEFAULT_HOSTS.length && !defaultApplied) {
+  let changed = false;
+  for (const raw of DEFAULT_HOSTS) {
+    const h = sanitizeHost(raw);
+    if (!h || hosts.some((x) => x.endpoint === h.endpoint || x.id === h.id)) continue;
+    hosts.push(h);
+    changed = true;
+  }
+  if (changed) saveHosts();
+  try {
+    if (defaultAppliedKey) localStorage.setItem(defaultAppliedKey, '1');
+  } catch {}
+}
+
+let currentHostId = '';
+let hasExplicitHost = false;
+try {
+  const qsHost = new URLSearchParams(location.search).get('host');
+  const savedHost = localStorage.getItem(CURRENT_HOST_KEY);
+  currentHostId = qsHost || savedHost || '';
+  hasExplicitHost = !!(qsHost || savedHost);
+} catch {}
+// 只有“首次应用默认主机”且没有显式选择时才强制选中默认项；
+// 之后继续尊重用户手动选择的主机或 URL 里的 ?host=。
+const defaultHost = defaultEndpoint
+  ? hosts.find((h) => h.endpoint === defaultEndpoint)
+  : null;
+if (!defaultApplied && defaultHost && !hasExplicitHost) {
+  currentHostId = defaultHost.id;
+}
+let currentHost = hosts.find((h) => h.id === currentHostId)
+  || hosts.find((h) => h.endpoint === normalizeEndpoint(currentHostId))
+  || defaultHost
+  || hosts[0]
+  || null;
+if (currentHost) {
+  currentHostId = currentHost.id;
+} else {
+  currentHostId = '';
+}
+persistCurrentHost();
+
+// API 基网址（当前选中的 DSH Bridge 实例；未选主机时为空）
+let BASE = currentHost ? currentHost.endpoint : '';
+
+function renderHostSelect() {
+  const sel = document.getElementById('hostSelect');
+  if (!sel) return;
+  sel.innerHTML = '';
+  if (!hosts.length) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '未选择主机';
+    sel.appendChild(opt);
+    sel.value = '';
+    sel.disabled = true;
+    return;
+  }
+  sel.disabled = false;
+  for (const h of hosts) {
+    const opt = document.createElement('option');
+    opt.value = h.id;
+    opt.textContent = h.name;
+    opt.title = h.endpoint;
+    sel.appendChild(opt);
+  }
+  sel.value = currentHostId;
+}
+
+function renderHostList() {
+  const box = document.getElementById('hostList');
+  if (!box) return;
+  const title = document.getElementById('hostModalTitle');
+  if (title) title.textContent = `DSH 主机管理（${hosts.length}）`;
+  if (!hosts.length) {
+    box.innerHTML = '<div class="host-empty">还没有主机<br>请点击「+ 添加主机」或「导入」</div>';
+    return;
+  }
+  box.innerHTML = hosts.map((h) => {
+    const active = h.id === currentHostId;
+    return `<div class="host-item${active ? ' active' : ''}" data-id="${escapeAttr(h.id)}">
+      <div class="host-main">
+        <div class="host-name">${escapeHtml(h.name)}${active ? '<span class="host-badge">当前</span>' : ''}</div>
+        <div class="host-url">${escapeHtml(h.endpoint)}</div>
+        ${h.note ? `<div class="host-note">${escapeHtml(h.note)}</div>` : ''}
+      </div>
+      <div class="host-actions">
+        <button type="button" data-action="use" data-id="${escapeAttr(h.id)}"${active ? ' disabled' : ''}>连接</button>
+        <button type="button" data-action="edit" data-id="${escapeAttr(h.id)}">编辑</button>
+        <button type="button" class="danger" data-action="delete" data-id="${escapeAttr(h.id)}">删除</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+let editingHostId = null;
+
+function showHostForm(host) {
+  editingHostId = host ? host.id : null;
+  const form = document.getElementById('hostForm');
+  const title = document.getElementById('hostFormTitle');
+  const name = document.getElementById('hostName');
+  const endpoint = document.getElementById('hostEndpoint');
+  const note = document.getElementById('hostNote');
+  if (!form) return;
+  if (title) title.textContent = host ? '编辑主机' : '添加主机';
+  name.value = host ? host.name : '';
+  endpoint.value = host ? host.endpoint : '';
+  note.value = host ? (host.note || '') : '';
+  form.style.display = 'block';
+  name.focus();
+}
+
+function hideHostForm() {
+  editingHostId = null;
+  const form = document.getElementById('hostForm');
+  if (form) form.style.display = 'none';
+}
+
+function openHostModal() {
+  renderHostSelect();
+  renderHostList();
+  hideHostForm();
+  document.getElementById('hostModal')?.classList.add('show');
+}
+
+function closeHostModal() {
+  document.getElementById('hostModal')?.classList.remove('show');
+}
+
+function switchHost(id) {
+  const h = hosts.find((x) => x.id === id);
+  if (!h || h.id === currentHostId) return;
+  currentHostId = h.id;
+  currentHost = h;
+  BASE = h.endpoint;
+  persistCurrentHost();
+  try {
+    const url = new URL(location.href);
+    url.searchParams.set('host', h.id);
+    location.href = url.toString();
+  } catch {
+    location.reload();
+  }
+}
+
+function saveHostForm() {
+  const name = document.getElementById('hostName').value.trim();
+  const endpoint = normalizeEndpoint(document.getElementById('hostEndpoint').value);
+  const note = document.getElementById('hostNote').value.trim();
+  if (!name) { alert('请填写主机名称'); return; }
+  if (!endpoint) { alert('请填写有效的 API 端点（http:// 或 https://）'); return; }
+  const duplicate = hosts.find((h) => h.endpoint === endpoint && h.id !== editingHostId);
+  if (duplicate) {
+    alert(`该 API 端点已存在：${duplicate.name}`);
+    return;
+  }
+
+  if (editingHostId) {
+    const h = hosts.find((x) => x.id === editingHostId);
+    if (!h) return;
+    const endpointChanged = h.endpoint !== endpoint;
+    const wasCurrent = h.id === currentHostId;
+    h.name = name;
+    h.endpoint = endpoint;
+    h.note = note;
+    saveHosts();
+    if (wasCurrent && endpointChanged) {
+      BASE = endpoint;
+      persistCurrentHost();
+      location.reload();
+      return;
+    }
+    if (wasCurrent) {
+      currentHost = h;
+      BASE = h.endpoint;
+      persistCurrentHost();
+    }
+  } else {
+    const added = {
+      id: newHostId(),
+      name,
+      endpoint,
+      note,
+      createdAt: Date.now(),
+    };
+    hosts.push(added);
+    saveHosts();
+    if (!currentHost) {
+      currentHostId = added.id;
+      currentHost = added;
+      BASE = added.endpoint;
+      persistCurrentHost();
+      hideHostForm();
+      closeHostModal();
+      location.reload();
+      return;
+    }
+  }
+
+  hideHostForm();
+  renderHostSelect();
+  renderHostList();
+}
+
+function deleteHost(id) {
+  const h = hosts.find((x) => x.id === id);
+  if (!h) return;
+  if (!confirm(`确定删除主机「${h.name}」？`)) return;
+  const wasCurrent = h.id === currentHostId;
+  hosts = hosts.filter((x) => x.id !== id);
+  saveHosts();
+  if (!hosts.length) {
+    currentHostId = '';
+    currentHost = null;
+    BASE = '';
+    persistCurrentHost();
+    renderHostSelect();
+    renderHostList();
+    closeHostModal();
+    location.reload();
+    return;
+  }
+  if (wasCurrent) {
+    currentHostId = hosts[0].id;
+    currentHost = hosts[0];
+    BASE = currentHost.endpoint;
+    persistCurrentHost();
+    location.reload();
+    return;
+  }
+  renderHostSelect();
+  renderHostList();
+}
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quoted) {
+      if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+      else if (ch === '"') quoted = false;
+      else cell += ch;
+    } else if (ch === '"') {
+      quoted = true;
+    } else if (ch === ',') {
+      row.push(cell); cell = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (cell !== '' || row.length) { row.push(cell); rows.push(row); row = []; cell = ''; }
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+    } else {
+      cell += ch;
+    }
+  }
+  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  return rows.filter((r) => r.some((c) => String(c).trim() !== ''));
+}
+
+function parseHostsText(text) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return [];
+  try {
+    const data = JSON.parse(trimmed);
+    if (Array.isArray(data)) return data;
+    if (data && Array.isArray(data.hosts)) return data.hosts;
+    if (data && typeof data === 'object') return [data];
+  } catch {}
+  const rows = parseCsv(trimmed);
+  if (!rows.length) return [];
+  const header = rows[0].map((x) => String(x).trim().toLowerCase());
+  const hasHeader = header.some((x) => ['endpoint', 'api', 'url', 'name', '备注', '名称'].includes(x));
+  const idx = hasHeader ? {
+    name: header.findIndex((x) => ['name', '名称', 'title'].includes(x)),
+    endpoint: header.findIndex((x) => ['endpoint', 'api', 'url', 'api端点', '地址'].includes(x)),
+    note: header.findIndex((x) => ['note', '备注', 'description', '描述'].includes(x)),
+  } : { name: 0, endpoint: 1, note: 2 };
+  const body = rows.slice(hasHeader ? 1 : 0);
+  return body.map((r) => ({
+    name: idx.name >= 0 ? r[idx.name] : '',
+    endpoint: idx.endpoint >= 0 ? r[idx.endpoint] : '',
+    note: idx.note >= 0 ? r[idx.note] : '',
+  }));
+}
+
+function importHostsFromText(text) {
+  const incoming = [];
+  for (const raw of parseHostsText(text)) {
+    const h = sanitizeHost(raw);
+    if (h) incoming.push(h);
+  }
+  if (!incoming.length) {
+    alert('没有解析到有效主机。请检查 JSON/CSV 中的 name、endpoint 字段。');
+    return false;
+  }
+  let added = 0;
+  let updated = 0;
+  const hadCurrent = !!currentHost;
+  for (const h of incoming) {
+    const existing = hosts.find((x) => x.endpoint === h.endpoint);
+    if (existing) {
+      if (h.name) existing.name = h.name;
+      if (h.note) existing.note = h.note;
+      updated++;
+    } else {
+      h.id = newHostId();
+      hosts.push(h);
+      added++;
+    }
+  }
+  saveHosts();
+  if (!hadCurrent && hosts.length) {
+    currentHostId = hosts[0].id;
+    currentHost = hosts[0];
+    BASE = currentHost.endpoint;
+    persistCurrentHost();
+    renderHostSelect();
+    renderHostList();
+    alert(`导入完成：新增 ${added} 个，更新 ${updated} 个`);
+    closeHostModal();
+    location.reload();
+    return true;
+  }
+  renderHostSelect();
+  renderHostList();
+  alert(`导入完成：新增 ${added} 个，更新 ${updated} 个`);
+  return true;
+}
+
+function exportHosts() {
+  const data = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    hosts: hosts.map((h) => ({
+      id: h.id,
+      name: h.name,
+      endpoint: h.endpoint,
+      note: h.note || '',
+      createdAt: h.createdAt,
+    })),
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  a.href = url;
+  a.download = `dsh-hosts-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function openPasteImport() {
+  const modal = document.getElementById('hostPasteModal');
+  const text = document.getElementById('hostPasteText');
+  if (!modal || !text) return;
+  text.value = '';
+  modal.classList.add('show');
+  text.focus();
+  if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+    navigator.clipboard.readText().then((v) => {
+      if (v && !text.value) text.value = v;
+    }).catch(() => {});
+  }
+}
+
+function closePasteImport() {
+  document.getElementById('hostPasteModal')?.classList.remove('show');
+}
+
+async function readClipboardIntoPaste() {
+  const text = document.getElementById('hostPasteText');
+  if (!text) return;
+  try {
+    const v = await navigator.clipboard.readText();
+    text.value = v || '';
+    text.focus();
+  } catch {
+    alert('无法读取剪贴板，请在文本框中手动粘贴');
+  }
+}
+
+function doPasteImport() {
+  const text = document.getElementById('hostPasteText');
+  if (!text) return;
+  const value = text.value.trim();
+  if (!value) { alert('请先粘贴 JSON 或 CSV 文本'); return; }
+  if (importHostsFromText(value)) closePasteImport();
+}
+
+// 远程代理下，一次性拉 500 条历史可能有好几 MB。
+// 这里按“消息条数”分页：首次只取最新一页，向上滚动/点击时再取更早的页。
+// 10 条在大多数会话里约 100–200 KB；工具输出特别大的会话也不会一次拖几 MB。
+const HISTORY_PAGE_MESSAGES = 10;
+const HISTORY_AUTO_LOAD_PX = 80;
+// SSE 在部分 HTTP 代理下只建立连接、不转发 data 帧；这里用轻量轮询兜底。
+// 任务运行中/刚发送时快轮询；空闲时降低频率，避免长期开着页面持续消耗代理流量。
+const POLL_INTERVAL_MS = 1500;
+const POLL_IDLE_INTERVAL_MS = 6000;
+// 轮询补事件时只取最近几条消息；page 会自动带上消息之间的工具事件。
+const POLL_PAGE_MESSAGES = 3;
+
+const state = { 
+  tasks: [], workspaces: [], archivedSessionIds: new Set(), currentSessionId: null, sse: null, refreshTimer: null, lastSeq: -1, 
+  pollTimer: null, pollBusy: false, pollFastUntil: 0,
+  pendingUserEchoes: [],
+  draftImages: [],
+  imageCache: new Map(),
+  imageLimits: null,
+  speechCatalog: null,
+  speechAvailable: false,
+  voiceBusy: false,
+  voiceRecording: false,
+  voiceTranscribing: false,
+  voiceAbort: false,
+  voiceStream: null,
+  voiceRecorder: null,
+  voiceChunks: [],
+  voiceTimer: null,
+  voiceStartedAt: 0,
+  voiceMaxDuration: 120,
+  voiceProviderId: null,
+  voiceLanguage: 'auto',
+  toolCallNodes: new Map(),
+  orphanToolResults: new Map(),
+  history: null,
+  totalTokens: 0,
+  totalCacheRead: 0,
+  totalBilledInput: 0,
+  cacheHitPercent: null,
+  contextPercent: null,
+  contextTokens: null,
+  contextWindow: null,
+  totalTurns: 0,
+  totalSteps: 0,
+  modelsLoaded: false,
+  modelMap: {}, // 映射 modelId -> { provider, efforts, defaultEffort }
+};
+
+async function api(method, path, body) {
+  if (!BASE) throw new Error('未选择 DSH 主机');
+  const opts = { method, headers: {} };
+  if (body !== undefined) { opts.headers['content-type'] = 'application/json; charset=utf-8'; opts.body = JSON.stringify(body); }
+  const r = await fetch(`${BASE}${path}`, opts);
+  const ct = r.headers.get('content-type') || '';
+  const text = await r.text();
+  if (!ct.includes('application/json')) throw new Error(`HTTP ${r.status}: ${text.slice(0, 200)}`);
+  const j = JSON.parse(text);
+  if (j.ok === false) throw new Error(`${j.code || 'error'}: ${j.message || ''}`);
+  return j;
+}
+
+async function apiRpc(ns, method, args) {
+  const r = await api('POST', '/api/dsh/rpc', { ns, method, args });
+  return r.value;
+}
+
+async function checkConn() {
+  if (!BASE) { document.getElementById('connDot').classList.remove('on'); return false; }
+  try { await api('GET', '/health'); document.getElementById('connDot').classList.add('on'); return true; }
+  catch { document.getElementById('connDot').classList.remove('on'); return false; }
+}
+
+// ============================================================
+// 完美解析模型与推理等级
+// ============================================================
+async function loadModels(force = false) {
+  if (state.modelsLoaded && !force) return;
+  try {
+    const val = await apiRpc('session', 'modelCatalog', {});
+    const select = document.getElementById('modelSelect');
+    const previousModel = select.value;
+    select.innerHTML = '';
+    state.modelMap = {};
+
+    let added = 0;
+    const seen = new Set();
+
+    // 严格按照 DSH 返回的真实结构解析。
+    // 注意：不同 provider 下可能有同名/同 id 模型（例如 deepseek-flash
+    // 同时出现在 DeepSeek 和 DeepSeek Account 中），必须按 provider+model
+    // 作为唯一键，否则会把整个 provider 的模型组丢掉。
+    const groups = val?.groups || [];
+    for (const g of groups) {
+      const pid = g.id;
+      const models = g.models || [];
+      
+      let optgroup = document.createElement('optgroup');
+      optgroup.label = g.name || pid;
+
+      for (const m of models) {
+        const mid = m.id;
+        const key = `${pid}::${mid}`;
+        if (!mid || seen.has(key)) continue;
+        seen.add(key);
+
+        // 记录该模型支持的推理等级和默认等级
+        const efforts = (m.reasoning?.efforts || []).map(e => ({ id: e.id, name: e.name }));
+        const defaultEffort = m.reasoning?.defaultEffort || '';
+
+        state.modelMap[key] = { 
+          provider: pid,
+          model: mid,
+          efforts: efforts,
+          defaultEffort: defaultEffort 
+        };
+
+        const opt = document.createElement('option');
+        opt.value = key;
+        opt.dataset.provider = pid;
+        opt.dataset.model = mid;
+        opt.textContent = m.name || mid;
+        optgroup.appendChild(opt);
+        added++;
+      }
+      
+      if (optgroup.children.length > 0) {
+        select.appendChild(optgroup);
+      }
+    }
+
+    if (added === 0) {
+      select.innerHTML = '<option value="">无可用模型</option>';
+    } else {
+      // 刷新目录时尽量保留当前选中项（新增自定义模型后再由调用方切换）
+      if (previousModel && Array.from(select.options).some((o) => o.value === previousModel)) {
+        select.value = previousModel;
+      }
+      // 加载完成后，联动更新一次推理等级下拉框
+      updateEffortOptions();
+    }
+    syncModelPickerLabel();
+    if (document.getElementById('modelPickerModal').classList.contains('show')) renderModelPickerList();
+    state.modelsLoaded = true;
+  } catch (e) {
+    console.warn('loadModels failed:', e);
+    state.modelsLoaded = false;
+    document.getElementById('modelSelect').innerHTML = '<option value="">拉取失败</option>';
+    syncModelPickerLabel();
+  }
+}
+
+// 当模型改变时，刷新推理等级下拉框
+function updateEffortOptions() {
+  const modelId = document.getElementById('modelSelect').value;
+  const effortSelect = document.getElementById('effortSelect');
+  if (!modelId || !state.modelMap[modelId]) {
+    effortSelect.innerHTML = '<option value="">不支持</option>';
+    effortSelect.disabled = true;
+    return;
+  }
+
+  const info = state.modelMap[modelId];
+  effortSelect.innerHTML = '';
+
+  if (!info.efforts || info.efforts.length === 0) {
+    // 如果模型没有推理等级配置
+    effortSelect.innerHTML = '<option value="">不支持</option>';
+    effortSelect.disabled = true;
+    return;
+  }
+
+  // 有推理等级配置，启用并填充
+  effortSelect.disabled = false;
+  for (const e of info.efforts) {
+    const opt = document.createElement('option');
+    opt.value = e.id;
+    opt.textContent = e.name || e.id;
+    if (e.id === info.defaultEffort) opt.selected = true; // 选中默认值
+    effortSelect.appendChild(opt);
+  }
+}
+
+function syncModelPickerLabel() {
+  const select = document.getElementById('modelSelect');
+  const label = document.getElementById('modelPickerLabel');
+  const btn = document.getElementById('modelPickerBtn');
+  if (!select || !label) return;
+  const opt = select.selectedIndex >= 0 ? select.options[select.selectedIndex] : null;
+  const text = opt ? (opt.textContent || '').trim() : '';
+  label.textContent = text || '选择模型';
+  if (btn) {
+    btn.title = text ? `选择模型：${text}` : '选择模型';
+    btn.disabled = !select.options.length;
+  }
+}
+
+function renderModelPickerList() {
+  const select = document.getElementById('modelSelect');
+  const list = document.getElementById('modelPickerList');
+  if (!select || !list) return;
+  list.innerHTML = '';
+  let count = 0;
+
+  const addOption = (opt) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'model-option' + (opt.value === select.value ? ' selected' : '');
+    btn.dataset.value = opt.value;
+
+    const text = document.createElement('span');
+    text.className = 'model-option-text';
+    text.textContent = opt.textContent || opt.value || '未命名模型';
+
+    const check = document.createElement('span');
+    check.className = 'model-check';
+    check.textContent = '✓';
+
+    btn.appendChild(text);
+    btn.appendChild(check);
+    btn.addEventListener('click', () => chooseModel(opt.value));
+    list.appendChild(btn);
+    count++;
+  };
+
+  for (const child of Array.from(select.children)) {
+    if (child.tagName === 'OPTGROUP') {
+      if (!child.children.length) continue;
+      const title = document.createElement('div');
+      title.className = 'model-group-title';
+      title.textContent = child.label || '';
+      list.appendChild(title);
+      for (const opt of Array.from(child.children)) addOption(opt);
+    } else if (child.tagName === 'OPTION') {
+      addOption(child);
+    }
+  }
+
+  if (!count) {
+    const empty = document.createElement('div');
+    empty.className = 'model-empty';
+    empty.textContent = '暂无可用模型';
+    list.appendChild(empty);
+  }
+}
+
+function openModelPicker() {
+  const modal = document.getElementById('modelPickerModal');
+  if (!modal) return;
+  renderModelPickerList();
+  modal.classList.add('show');
+  document.getElementById('modelPickerBtn')?.setAttribute('aria-expanded', 'true');
+  requestAnimationFrame(() => {
+    const selected = document.querySelector('#modelPickerList .model-option.selected');
+    if (selected) selected.scrollIntoView({ block: 'center' });
+  });
+}
+
+function closeModelPicker() {
+  document.getElementById('modelPickerModal')?.classList.remove('show');
+  document.getElementById('modelPickerBtn')?.setAttribute('aria-expanded', 'false');
+}
+
+// ============================================================
+// 自定义模型：在模型选择器里创建 llm-pi-ai 提供商
+// ============================================================
+const CUSTOM_MODEL_NS = 'llm-pi-ai';
+const CUSTOM_MODEL_ROUTE_RE = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const CUSTOM_MODEL_KEY_RE = /^[\x21-\x7E]+$/;
+const CUSTOM_MODEL_ENV_RE = /^[A-Z][A-Z0-9_]*=[^=]/;
+
+let customModelBusy = false;
+let customModelCommitted = null;
+
+function customModelKeyRef(provider) {
+  return `${provider.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`;
+}
+
+function isValidCustomModelUrl(value) {
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function isValidCustomModelKey(value) {
+  const v = String(value || '').trim();
+  if (!v) return true;
+  if (CUSTOM_MODEL_ENV_RE.test(v)) return false;
+  if ((v[0] === '"' || v[0] === "'" || v[0] === '`') && v.length > 1 && v.endsWith(v[0])) return false;
+  return CUSTOM_MODEL_KEY_RE.test(v);
+}
+
+function addCustomModelRow(id = '', name = '') {
+  const list = document.getElementById('cmModels');
+  if (!list) return;
+  const row = document.createElement('div');
+  row.className = 'custom-model-row';
+
+  const idInput = document.createElement('input');
+  idInput.className = 'cm-model-id';
+  idInput.type = 'text';
+  idInput.placeholder = '模型 ID';
+  idInput.value = id;
+  idInput.autocomplete = 'off';
+  idInput.spellcheck = false;
+
+  const nameInput = document.createElement('input');
+  nameInput.className = 'cm-model-name';
+  nameInput.type = 'text';
+  nameInput.placeholder = '显示名称（可选）';
+  nameInput.value = name;
+  nameInput.autocomplete = 'off';
+
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'cm-row-remove';
+  remove.title = '删除模型';
+  remove.textContent = '×';
+  remove.addEventListener('click', () => {
+    row.remove();
+    if (!list.children.length) addCustomModelRow();
+    updateCustomModelDisabledState();
+  });
+
+  row.appendChild(idInput);
+  row.appendChild(nameInput);
+  row.appendChild(remove);
+  list.appendChild(row);
+  updateCustomModelDisabledState();
+}
+
+function setCustomModelError(message) {
+  const el = document.getElementById('cmError');
+  if (!el) return;
+  el.textContent = message || '';
+  el.classList.toggle('show', !!message);
+}
+
+function updateCustomModelDisabledState() {
+  const modal = document.getElementById('customModelModal');
+  if (!modal) return;
+  const locked = customModelBusy || !!customModelCommitted;
+  modal.querySelectorAll('input, select, button').forEach((el) => {
+    if (el.id === 'cmCancel' || el.id === 'cmSave' || el.id === 'cmApiKey') {
+      el.disabled = customModelBusy;
+    } else {
+      el.disabled = locked;
+    }
+  });
+  const save = document.getElementById('cmSave');
+  if (save) {
+    save.textContent = customModelBusy
+      ? '正在创建…'
+      : customModelCommitted ? '重试保存密钥' : '创建并添加';
+  }
+}
+
+function resetCustomModelForm() {
+  customModelBusy = false;
+  customModelCommitted = null;
+  ['cmProvider', 'cmDisplayName', 'cmBaseURL', 'cmApiKey'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const protocol = document.getElementById('cmProtocol');
+  if (protocol) protocol.value = 'openai-completions';
+  const models = document.getElementById('cmModels');
+  if (models) models.innerHTML = '';
+  addCustomModelRow();
+  setCustomModelError('');
+  updateCustomModelDisabledState();
+}
+
+function openCustomModelModal() {
+  closeModelPicker();
+  resetCustomModelForm();
+  const modal = document.getElementById('customModelModal');
+  if (!modal) return;
+  modal.classList.add('show');
+  setTimeout(() => document.getElementById('cmProvider')?.focus(), 50);
+}
+
+function closeCustomModelModal(force = false) {
+  if (customModelBusy && !force) return;
+  document.getElementById('customModelModal')?.classList.remove('show');
+}
+
+function readCustomModelForm() {
+  const rows = Array.from(document.querySelectorAll('#cmModels .custom-model-row')).map((row) => ({
+    id: (row.querySelector('.cm-model-id')?.value || '').trim(),
+    name: (row.querySelector('.cm-model-name')?.value || '').trim(),
+  }));
+  const incomplete = rows.find((row) => !row.id && row.name);
+  const models = rows
+    .filter((row) => row.id)
+    .map((row) => (row.name ? { id: row.id, name: row.name } : { id: row.id }));
+  return {
+    provider: (document.getElementById('cmProvider')?.value || '').trim(),
+    displayName: (document.getElementById('cmDisplayName')?.value || '').trim(),
+    baseURL: (document.getElementById('cmBaseURL')?.value || '').trim(),
+    protocol: document.getElementById('cmProtocol')?.value || '',
+    apiKey: (document.getElementById('cmApiKey')?.value || '').trim(),
+    models,
+    incomplete,
+  };
+}
+
+function validateCustomModelForm(data) {
+  if (!data.provider) throw new Error('请填写 Provider ID。');
+  if (!CUSTOM_MODEL_ROUTE_RE.test(data.provider)) {
+    throw new Error('Provider ID 需以小写字母开头，之后只能包含小写字母、数字和短横线。');
+  }
+  if (!data.baseURL) throw new Error('请填写 API 地址。');
+  if (!isValidCustomModelUrl(data.baseURL)) throw new Error('API 地址必须是有效的 HTTP 或 HTTPS URL。');
+  if (!data.protocol) throw new Error('请选择 API 协议。');
+  if (!isValidCustomModelKey(data.apiKey)) {
+    throw new Error('API Key 只能包含可打印 ASCII 字符，不能是 NAME=value 或带引号的形式。');
+  }
+  if (data.incomplete) throw new Error('模型行填写了显示名称时，模型 ID 不能为空。');
+  if (!data.models.length) throw new Error('至少需要填写一个模型 ID。');
+  const seen = new Set();
+  for (const model of data.models) {
+    if (seen.has(model.id)) throw new Error(`模型 ID 不能重复：${model.id}`);
+    seen.add(model.id);
+  }
+}
+
+async function finishCustomModel(provider, firstModelId) {
+  customModelBusy = false;
+  closeCustomModelModal(true);
+  state.modelsLoaded = false;
+  await loadModels(true);
+  const select = document.getElementById('modelSelect');
+  const key = `${provider}::${firstModelId}`;
+  if (select && Array.from(select.options).some((o) => o.value === key)) {
+    select.value = key;
+    updateEffortOptions();
+    syncModelPickerLabel();
+    if (state.currentSessionId) await applyModelChange();
+  }
+  openModelPicker();
+}
+
+async function saveCustomModel() {
+  if (customModelBusy) return;
+  let data;
+  try {
+    data = readCustomModelForm();
+    validateCustomModelForm(data);
+  } catch (err) {
+    setCustomModelError(err.message);
+    return;
+  }
+
+  customModelBusy = true;
+  setCustomModelError('');
+  updateCustomModelDisabledState();
+
+  try {
+    // 设置已写入、仅密钥失败时，重试只补密钥，避免重复创建提供商。
+    if (customModelCommitted) {
+      if (!data.apiKey) throw new Error('请填写 API Key 后重试。');
+      await apiRpc('credentials', 'set', { ref: customModelCommitted.keyRef, value: data.apiKey });
+      await finishCustomModel(customModelCommitted.provider, data.models[0].id);
+      return;
+    }
+
+    const settings = await apiRpc('settings', 'describe', {});
+    if (!settings || settings.writable === false) throw new Error('当前 DSH 设置文档为只读，无法创建自定义模型。');
+    const ns = (settings.namespaces || []).find((item) => item.ns === CUSTOM_MODEL_NS);
+    if (!ns) throw new Error('当前 DSH 未挂载 llm-pi-ai 设置，无法创建自定义模型。');
+    if (ns.value?.providers?.[data.provider]) {
+      throw new Error(`Provider ID 已存在：${data.provider}`);
+    }
+
+    const keyRef = customModelKeyRef(data.provider);
+    const profile = {
+      api: data.protocol,
+      baseURL: data.baseURL,
+      models: data.models,
+    };
+    if (data.displayName) profile.displayName = data.displayName;
+    if (data.apiKey) profile.apiKeyEnv = keyRef;
+
+    await apiRpc('settings', 'mutate', {
+      ns: CUSTOM_MODEL_NS,
+      ops: [{ op: 'set', path: ['providers', data.provider], value: profile }],
+      expectedRevision: ns.revision,
+    });
+
+    customModelCommitted = { provider: data.provider, keyRef };
+    updateCustomModelDisabledState();
+
+    if (data.apiKey) {
+      try {
+        await apiRpc('credentials', 'set', { ref: keyRef, value: data.apiKey });
+      } catch (err) {
+        setCustomModelError(`提供商已创建，但 API Key 保存失败：${err.message}\n请重试保存密钥。`);
+        updateCustomModelDisabledState();
+        return;
+      }
+    }
+
+    await finishCustomModel(data.provider, data.models[0].id);
+  } catch (err) {
+    const message = String(err.message || err);
+    setCustomModelError(message.includes('settings/conflict')
+      ? '设置已被其他窗口修改，请关闭后重新打开再试。'
+      : message);
+  } finally {
+    customModelBusy = false;
+    updateCustomModelDisabledState();
+  }
+}
+
+function chooseModel(value) {
+  const select = document.getElementById('modelSelect');
+  if (!select || !value) return;
+  select.value = value;
+  syncModelPickerLabel();
+  closeModelPicker();
+  updateEffortOptions();
+  applyModelChange();
+}
+
+async function applyModelChange() {
+  const modelId = document.getElementById('modelSelect').value;
+  const effort = document.getElementById('effortSelect').value;
+  if (!modelId || !state.currentSessionId) return;
+
+  const info = state.modelMap[modelId];
+  if (!info) return;
+
+  // DSH 的 SessionSelectModelRequest 是扁平结构：
+  //   { sessionId, provider, model, reasoningEffort? }
+  // provider/model 与 sessionId 同级，不能再包一层 selection，
+  // 否则 DSH 边界校验失败（gateway/input-invalid）→ 400。
+  const request = {
+    sessionId: state.currentSessionId,
+    provider: info.provider,
+    model: info.model
+  };
+  // 如果 effort 为空（比如没选，或者该模型不支持），就不要发送 reasoningEffort，避免被服务端拒绝
+  if (effort) {
+    request.reasoningEffort = effort;
+  }
+
+  try {
+    const value = await apiRpc('session', 'selectModel', { request });
+    console.log('切换成功:', value?.selected || request);
+  } catch (err) {
+    // fetch 抛 TypeError = 网络/隧道层失败（没拿到合法 HTTP 响应），不是业务错误
+    if (err instanceof TypeError) {
+      alert('切换模型失败：与 bridge 的连接中断（隧道未返回合法的 HTTP 响应），请查看浏览器控制台');
+    } else {
+      alert('切换模型失败: ' + err.message);
+    }
+  }
+}
+
+// ============================================================
+// 任务与工作区
+// ============================================================
+async function loadTasks() {
+  if (!BASE) {
+    state.tasks = [];
+    const el = document.getElementById('taskList');
+    if (el) el.innerHTML = '<div class="empty">请先添加或导入 DSH 主机</div>';
+    return;
+  }
+  try { const r = await api('GET', '/api/tasks'); state.tasks = r.tasks || []; renderTaskList(); } catch (e) { console.error('loadTasks:', e); }
+}
+
+async function loadWorkspaces() {
+  if (!BASE) { state.workspaces = []; return; }
+  try {
+    const r = await api('GET', '/api/workspaces');
+    state.workspaces = r.workspaces || [];
+    const raw = r.raw || {};
+    const rawValue = raw.value || raw;
+    const archived = rawValue.archivedSessionIds || r.archivedSessionIds || [];
+    state.archivedSessionIds = new Set(Array.isArray(archived) ? archived : []);
+    renderTaskList();
+  } catch (e) {
+    state.workspaces = [];
+    state.archivedSessionIds = new Set();
+    renderTaskList();
+  }
+}
+
+function buildSessionToWorkspace() {
+  const map = new Map();
+  for (const ws of state.workspaces) { for (const sid of ws.sessionIds || []) map.set(sid, ws.workspaceId); }
+  return map;
+}
+
+function renderTaskList() {
+  const el = document.getElementById('taskList');
+  const visibleTasks = state.tasks.filter((t) => !state.archivedSessionIds?.has(t.sessionId));
+  if (!visibleTasks.length) { el.innerHTML = '<div class="empty">暂无任务</div>'; return; }
+  const sessionToWs = buildSessionToWorkspace();
+  const wsById = new Map(state.workspaces.map((w) => [w.workspaceId, w]));
+  const groups = new Map();
+  for (const t of visibleTasks) {
+    const wsId = sessionToWs.get(t.sessionId) || '__ungrouped__';
+    if (!groups.has(wsId)) groups.set(wsId, { ws: wsById.get(wsId) || null, tasks: [] });
+    groups.get(wsId).tasks.push(t);
+  }
+  const sorted = Array.from(groups.entries()).sort((a, b) => (a[0] === '__ungrouped__' ? 1 : b[0] === '__ungrouped__' ? -1 : 0));
+
+  let html = '';
+  for (const [wsId, g] of sorted) {
+    const wsTitle = g.ws?.title || (wsId === '__ungrouped__' ? '未分组' : basename(g.ws?.path) || wsId);
+    html += `<div class="ws-group"><div class="ws-title"><span>${escapeHtml(wsTitle)}</span><span class="count">${g.tasks.length}</span></div>`;
+    html += g.tasks.map(renderTaskItem).join('');
+    html += `</div>`;
+  }
+  el.innerHTML = html;
+  el.querySelectorAll('.task-item').forEach((item) => { item.onclick = () => selectTask(item.dataset.sid); });
+}
+
+function renderTaskItem(t) {
+  const active = t.sessionId === state.currentSessionId ? ' active' : '';
+  const title = t.title || (t.cwd ? basename(t.cwd) : null) || t.sessionId.slice(0, 20);
+  const badge = `<span class="badge ${escapeAttr(t.status || 'unknown')}">${t.status || '?'}</span>`;
+  const ago = t.updatedAt ? timeAgo(t.updatedAt) : '';
+  const approvals = t.pendingApprovals?.length ? `<span style="color:var(--yellow)">⚠ ${t.pendingApprovals.length} 待批</span>` : '';
+  return `<div class="task-item${active}" data-sid="${escapeAttr(t.sessionId)}"><div class="task-title">${escapeHtml(title)}</div><div class="task-meta">${badge}<span>${escapeHtml(ago)}</span>${approvals}</div></div>`;
+}
+
+async function selectTask(sessionId) {
+  if (state.currentSessionId === sessionId) return;
+  stopPolling();
+  if (state.voiceRecording || (state.voiceBusy && !state.voiceTranscribing)) cancelVoice();
+  state.currentSessionId = sessionId; 
+  state.lastSeq = -1; 
+  state.pollFastUntil = 0;
+  state.toolCallNodes.clear();
+  state.orphanToolResults.clear();
+  for (const entry of [...state.pendingUserEchoes]) removePendingUserEcho(entry);
+  for (const img of state.draftImages) {
+    try { URL.revokeObjectURL(img.previewUrl); } catch {}
+  }
+  state.draftImages = [];
+  renderDraftImages();
+  state.imageCache.clear();
+  state.imageLimits = null;
+  state.history = {
+    sessionId,
+    throughSeq: -1,
+    beforeSeq: 0,
+    hasMore: false,
+    loading: false,
+  };
+  state.totalTokens = 0;
+  state.totalCacheRead = 0;
+  state.totalBilledInput = 0;
+  state.cacheHitPercent = null;
+  state.contextPercent = null;
+  state.contextTokens = null;
+  state.contextWindow = null;
+  state.totalTurns = 0;
+  state.totalSteps = 0;
+
+  updateStatsUI();
+
+  if (state.sse) { try { state.sse.close(); } catch {} state.sse = null; }
+  document.getElementById('messages').innerHTML = '<div class="empty">加载中...</div>';
+  document.getElementById('sendBtn').disabled = false;
+  document.getElementById('steerBtn').disabled = false;
+  document.getElementById('cancelBtn').style.display = 'block';
+  document.body.classList.add('showing-main');
+  
+  const t = state.tasks.find((x) => x.sessionId === sessionId);
+  document.getElementById('curTitle').textContent = t?.title || t?.cwd || '任务';
+  document.getElementById('curSid').textContent = sessionId;
+  document.getElementById('curCwd').textContent = t?.cwd || '无工作区路径';
+  
+  if (t?.model) {
+    setTimeout(() => {
+      const sel = document.getElementById('modelSelect');
+      // 同一个 model id 可能属于多个 provider，优先按任务 provider 匹配；
+      // 任务接口没有 provider 时退回第一个同名模型。
+      const options = Array.from(sel.options);
+      const opt = (t.provider && options.find((o) => o.dataset.model === t.model && o.dataset.provider === t.provider))
+        || options.find((o) => o.dataset.model === t.model);
+      if (opt) {
+        sel.value = opt.value;
+        updateEffortOptions();
+        syncModelPickerLabel();
+      }
+    }, 1000);
+  }
+
+  renderTaskList();
+  await loadModels();
+  await loadHistory(sessionId);
+  // 加载期间用户可能切到了别的会话，别把旧会话的 SSE 覆盖到新会话上
+  if (state.currentSessionId !== sessionId || state.history?.sessionId !== sessionId) return;
+  openSse(sessionId);
+  startPolling(sessionId);
+}
+
+function formatTokens(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+  return String(n);
+}
+
+function billedInputTokens(tu) {
+  return (tu.uncachedInputTokens || 0) + (tu.cacheReadTokens || 0) + (tu.cacheWriteTokens || 0);
+}
+
+function cacheHitPercent(tu) {
+  const billed = billedInputTokens(tu);
+  if (!(billed > 0)) return null;
+  return (tu.cacheReadTokens || 0) / billed * 100;
+}
+
+function formatCacheHit(percent) {
+  if (percent >= 100) return '100';
+  return percent.toFixed(1);
+}
+
+function updateStatsUI() {
+  const tok = document.getElementById('statTokens');
+  tok.textContent = `${formatTokens(state.totalTokens)} tok`;
+  tok.title = `${state.totalTokens} tok（输入 + 输出 + 缓存读 + 缓存写）`;
+  document.getElementById('statRound').textContent = `${state.totalTurns} 轮 · ${state.totalSteps} 步`;
+
+  const cache = document.getElementById('statCache');
+  if (state.cacheHitPercent == null) {
+    cache.style.display = 'none';
+  } else {
+    cache.style.display = '';
+    cache.textContent = `缓存命中 ${formatCacheHit(state.cacheHitPercent)}%`;
+    cache.title = `缓存读 ${state.totalCacheRead} tok / 计费输入 ${state.totalBilledInput} tok`;
+  }
+
+  const context = document.getElementById('statContext');
+  if (state.contextPercent == null) {
+    context.style.display = 'none';
+  } else {
+    context.style.display = '';
+    context.textContent = `◔ ${Math.round(state.contextPercent)}%`;
+    context.title = `上下文占用 ${formatTokens(state.contextTokens)} / ${formatTokens(state.contextWindow)} tok（点击压缩）`;
+  }
+}
+
+// 点击上下文百分比 → 发送 /compact 斜杠命令触发 DSH 会话上下文压缩
+let compacting = false;
+async function compactContext() {
+  const sessionId = state.currentSessionId;
+  if (!sessionId) return;
+  if (compacting) return;
+  const pct = Math.round(state.contextPercent || 0);
+  const usage = `${formatTokens(state.contextTokens)} / ${formatTokens(state.contextWindow)} tok`;
+  if (!confirm(`压缩会话上下文？\n\n当前上下文占用 ${pct}%（${usage}）。\n压缩会将会话历史摘要化，早期的工具输出和对话细节将不再完整保留。`)) return;
+  compacting = true;
+  const context = document.getElementById('statContext');
+  const prevText = context ? context.textContent : '';
+  if (context) { context.textContent = '◔ 压缩中…'; context.classList.add('busy'); }
+  try {
+    await apiRpc('commands', 'execute', { agentId: sessionId, line: '/compact', submittedAttachments: [] });
+    if (context) context.title = '上下文压缩已触发';
+    refreshStats(sessionId);
+  } catch (err) {
+    if (context) { context.textContent = prevText; context.title = '压缩失败：' + (err && err.message || err); }
+    console.warn('compact failed', err);
+  } finally {
+    compacting = false;
+  }
+}
+
+(function bindContextClick() {
+  const el = document.getElementById('statContext');
+  if (!el) return;
+  el.addEventListener('click', compactContext);
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); compactContext(); }
+  });
+})();
+
+// 用 DSH 投影同步统计值（与官方界面同源，避免逐事件求和的口径误差）
+function applyProjectionStats(proj) {
+  const tu = proj?.values?.tokenUsage;
+  const st = proj?.values?.sessionStats;
+  if (tu) {
+    const billed = billedInputTokens(tu);
+    state.totalBilledInput = billed;
+    state.totalCacheRead = tu.cacheReadTokens || 0;
+    state.cacheHitPercent = cacheHitPercent(tu);
+    state.totalTokens = billed + (tu.outputTokens || 0);
+  }
+  if (st) {
+    state.totalTurns = st.turns || 0;
+    state.totalSteps = st.steps || 0;
+  }
+  const cp = proj?.values?.contextPressure;
+  const used = cp?.projectedTokens ?? cp?.pressureTokens;
+  if (Number.isFinite(used) && Number.isFinite(cp?.contextWindow) && cp.contextWindow > 0) {
+    state.contextTokens = used;
+    state.contextWindow = cp.contextWindow;
+    state.contextPercent = used / cp.contextWindow * 100;
+  } else {
+    state.contextTokens = null;
+    state.contextWindow = null;
+    state.contextPercent = null;
+  }
+  const limits = proj?.values?.imageLimits;
+  if (limits) state.imageLimits = limits;
+  return !!(tu || st);
+}
+
+// turn 结束时按投影重新校准一次（SSE 期间按事件累加只作实时近似）
+async function refreshStats(sessionId) {
+  if (!sessionId) return;
+  try {
+    const proj = await apiRpc('session', 'projections', { request: { sessionId } });
+    if (sessionId !== state.currentSessionId) return;
+    applyProjectionStats(proj);
+    updateStatsUI();
+  } catch (e) {
+    console.warn('refreshStats failed:', e);
+  }
+}
+
+function renderMarkdown(text) {
+  if (typeof marked === 'undefined') return escapeHtml(text);
+  const html = marked.parse(text);
+  const temp = document.createElement('div');
+  temp.innerHTML = html;
+  temp.querySelectorAll('script, iframe, style, link').forEach(el => el.remove());
+  return temp.innerHTML;
+}
+
+// ============================================================
+// 图片上传、缩略图与预览
+// ============================================================
+function normalizeImageType(type, name) {
+  const t = String(type || '').toLowerCase();
+  if (['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(t)) return t;
+  const ext = String(name || '').toLowerCase().split('.').pop();
+  return ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif' })[ext] || null;
+}
+
+function formatBytes(n) {
+  if (!n && n !== 0) return '';
+  if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB';
+  if (n >= 1024) return (n / 1024).toFixed(0) + ' KB';
+  return n + ' B';
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const s = String(reader.result || '');
+      const i = s.indexOf(',');
+      if (i < 0) reject(new Error('读取图片失败'));
+      else resolve(s.slice(i + 1));
+    };
+    reader.onerror = () => reject(reader.error || new Error('读取图片失败'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function makeImagePart(file) {
+  const mediaType = normalizeImageType(file.type, file.name);
+  if (!mediaType) throw new Error(`不支持的图片格式：${file.name || file.type || '未知'}`);
+  const limits = state.imageLimits;
+  if (limits?.maxImageBytes && file.size > limits.maxImageBytes) {
+    throw new Error(`图片过大：${file.name || ''}（上限 ${formatBytes(limits.maxImageBytes)}）`);
+  }
+  const data = await fileToBase64(file);
+  return { type: 'image', mediaType, data, ...(file.name ? { name: file.name } : {}) };
+}
+
+function addDraftImages(fileList) {
+  const files = Array.from(fileList || []);
+  if (!files.length) return;
+  const limits = state.imageLimits;
+  let count = state.draftImages.length;
+  for (const file of files) {
+    const mediaType = normalizeImageType(file.type, file.name);
+    if (!mediaType) {
+      alert(`不支持的图片格式：${file.name || file.type || '未知'}\n仅支持 PNG / JPEG / WebP / GIF`);
+      continue;
+    }
+    if (limits?.maxImageBytes && file.size > limits.maxImageBytes) {
+      alert(`图片过大：${file.name || ''}\n上限 ${formatBytes(limits.maxImageBytes)}`);
+      continue;
+    }
+    if (limits?.maxImagesPerMessage && count >= limits.maxImagesPerMessage) {
+      alert(`一次最多发送 ${limits.maxImagesPerMessage} 张图片`);
+      break;
+    }
+    state.draftImages.push({
+      id: crypto.randomUUID(),
+      file,
+      name: file.name || 'image',
+      previewUrl: URL.createObjectURL(file),
+    });
+    count++;
+  }
+  renderDraftImages();
+}
+
+function renderDraftImages() {
+  const el = document.getElementById('draftImages');
+  if (!el) return;
+  el.innerHTML = '';
+  if (!state.draftImages.length) {
+    el.classList.remove('show');
+    return;
+  }
+  el.classList.add('show');
+  for (const img of state.draftImages) {
+    const item = document.createElement('div');
+    item.className = 'draft-item';
+    const preview = document.createElement('img');
+    preview.src = img.previewUrl;
+    preview.alt = img.name;
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = '×';
+    remove.title = '移除图片';
+    remove.onclick = () => removeDraftImage(img.id);
+    item.appendChild(preview);
+    item.appendChild(remove);
+    el.appendChild(item);
+  }
+}
+
+function removeDraftImage(id) {
+  const i = state.draftImages.findIndex((x) => x.id === id);
+  if (i < 0) return;
+  const [img] = state.draftImages.splice(i, 1);
+  try { URL.revokeObjectURL(img.previewUrl); } catch {}
+  renderDraftImages();
+}
+
+function removeDraftImages(images) {
+  const ids = new Set(images.map((x) => x.id));
+  const keep = [];
+  for (const img of state.draftImages) {
+    if (ids.has(img.id)) {
+      try { URL.revokeObjectURL(img.previewUrl); } catch {}
+    } else keep.push(img);
+  }
+  state.draftImages = keep;
+  renderDraftImages();
+}
+
+function resolveAttachmentImage(attachment, sessionId) {
+  const id = attachment?.attachmentId;
+  if (!id || !sessionId) return Promise.resolve(null);
+  const cached = state.imageCache.get(id);
+  if (cached) return cached;
+  const p = apiRpc('session', 'attachment', { request: { sessionId, attachmentId: id } })
+    .then((res) => {
+      if (!res?.data) throw new Error('附件无图片数据');
+      const mediaType = res.attachment?.mediaType || attachment.mediaType || 'image/png';
+      return `data:${mediaType};base64,${res.data}`;
+    })
+    .catch((e) => {
+      console.warn('[image] load failed:', e);
+      state.imageCache.delete(id);
+      return null;
+    });
+  state.imageCache.set(id, p);
+  return p;
+}
+
+function appendImageThumb(container, part, sessionId) {
+  const att = part.attachment || {};
+  const alt = att.name || part.name || '图片';
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'msg-image loading';
+  btn.title = '点击预览';
+  const placeholder = document.createElement('span');
+  placeholder.className = 'img-placeholder';
+  placeholder.textContent = '加载中…';
+  const img = document.createElement('img');
+  img.alt = alt;
+  img.style.display = 'none';
+  btn.appendChild(placeholder);
+  btn.appendChild(img);
+  container.appendChild(btn);
+
+  const fail = () => {
+    btn.classList.remove('loading');
+    btn.classList.add('failed');
+    placeholder.textContent = '图片加载失败';
+  };
+  const show = (url) => {
+    if (!url) return fail();
+    img.onload = () => {
+      img.style.display = 'block';
+      placeholder.remove();
+      btn.classList.remove('loading');
+      btn.onclick = () => openLightbox(url, alt);
+    };
+    img.onerror = fail;
+    img.src = url;
+  };
+
+  if (part.data && part.mediaType) show(`data:${part.mediaType};base64,${part.data}`);
+  else if (part.previewUrl) show(part.previewUrl);
+  else if (att.attachmentId) resolveAttachmentImage(att, sessionId).then(show);
+  else fail();
+}
+
+function openLightbox(url, alt) {
+  const lb = document.getElementById('lightbox');
+  const img = document.getElementById('lightboxImg');
+  if (!lb || !img) return;
+  img.src = url;
+  img.alt = alt || '图片';
+  lb.classList.add('show');
+}
+
+function closeLightbox() {
+  const lb = document.getElementById('lightbox');
+  const img = document.getElementById('lightboxImg');
+  if (!lb) return;
+  lb.classList.remove('show');
+  if (img) { img.removeAttribute('src'); img.alt = ''; }
+}
+
+// ============================================================
+// 语音输入（DSH speech / SenseVoice 本地识别）
+// ============================================================
+function formatDuration(seconds) {
+  const s = Math.max(0, Math.floor(seconds || 0));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+function setVoiceStatus(text, cancelable) {
+  const el = document.getElementById('voiceStatus');
+  const label = document.getElementById('voiceStatusText');
+  const btn = document.getElementById('voiceCancelBtn');
+  if (!el || !label) return;
+  if (text) {
+    label.textContent = text;
+    el.classList.add('show');
+    if (btn) btn.style.display = cancelable ? '' : 'none';
+  } else {
+    label.textContent = '';
+    el.classList.remove('show');
+    if (btn) btn.style.display = 'none';
+  }
+}
+
+function updateVoiceButton() {
+  const btn = document.getElementById('voiceBtn');
+  if (!btn) return;
+  btn.textContent = state.voiceRecording ? '⏹' : (state.voiceBusy ? '…' : '🎤');
+  btn.classList.toggle('recording', state.voiceRecording);
+  btn.disabled = state.voiceBusy && !state.voiceRecording;
+  btn.title = state.voiceRecording
+    ? '停止录音并识别'
+    : state.voiceBusy
+      ? '语音处理中…'
+      : state.speechAvailable
+        ? '语音输入'
+        : '语音输入（需重启 DSH 加载语音插件）';
+}
+
+function speechProviderOf(catalog) {
+  if (!catalog?.providers?.length) return null;
+  return catalog.providers.find((p) => p.id === catalog.selection?.providerId) || catalog.providers[0];
+}
+
+function speechPhaseReady(phase) {
+  return phase === 'ready' || phase === 'standby' || phase === 'waking' || phase === 'loading';
+}
+
+async function loadSpeechCatalog(silent) {
+  try {
+    const catalog = await apiRpc('speech', 'catalog', {});
+    if (!catalog?.providers?.length) throw new Error('没有可用的语音识别器');
+    state.speechCatalog = catalog;
+    state.speechAvailable = true;
+    const provider = speechProviderOf(catalog);
+    state.voiceProviderId = provider?.id || 'sensevoice-local';
+    state.voiceLanguage = catalog.selection?.language || 'auto';
+    state.voiceMaxDuration = catalog.maxDurationSeconds || 120;
+    updateVoiceButton();
+    return catalog;
+  } catch (e) {
+    state.speechAvailable = false;
+    state.speechCatalog = null;
+    updateVoiceButton();
+    if (!silent) {
+      alert('语音服务未就绪：' + (e.message || e) + '\n\n如果刚启用语音 Bundle，请重启 DSH Web 后再试。');
+    }
+    return null;
+  }
+}
+
+async function waitForSpeechReady(providerId) {
+  for (let i = 0; i < 900; i++) {
+    if (state.voiceAbort) throw new Error('cancelled');
+    await new Promise((r) => setTimeout(r, 2000));
+    if (state.voiceAbort) throw new Error('cancelled');
+    let catalog;
+    try {
+      catalog = await apiRpc('speech', 'catalog', {});
+    } catch (e) {
+      continue;
+    }
+    state.speechCatalog = catalog;
+    state.voiceMaxDuration = catalog.maxDurationSeconds || state.voiceMaxDuration;
+    const provider = catalog.providers?.find((p) => p.id === providerId) || speechProviderOf(catalog);
+    const prep = provider?.preparation || {};
+    if (speechPhaseReady(prep.phase)) {
+      setVoiceStatus('');
+      return { catalog, provider };
+    }
+    if (prep.phase === 'failed') throw new Error(prep.message || '语音模型准备失败');
+    if (prep.phase === 'cancelled') throw new Error('语音模型准备已取消');
+    if (prep.phase === 'downloading') {
+      const total = prep.totalBytes ? ` / ${formatBytes(prep.totalBytes)}` : '';
+      setVoiceStatus(`正在下载语音模型 ${formatBytes(prep.completedBytes || 0)}${total}…`, true);
+    } else {
+      setVoiceStatus('正在准备语音识别模型…', true);
+    }
+  }
+  throw new Error('语音模型准备超时');
+}
+
+async function ensureSpeechReady() {
+  let catalog = state.speechCatalog;
+  if (!catalog) catalog = await loadSpeechCatalog(true);
+  if (!catalog) throw new Error('语音服务未启用');
+  let provider = speechProviderOf(catalog);
+  if (!provider) throw new Error('没有可用的语音识别器');
+
+  state.voiceProviderId = provider.id;
+  state.voiceLanguage = catalog.selection?.language || 'auto';
+  state.voiceMaxDuration = catalog.maxDurationSeconds || 120;
+
+  const phase = provider.preparation?.phase;
+  if (speechPhaseReady(phase)) return { catalog, provider };
+  if (phase === 'downloading' || phase === 'checking' || phase === 'cancelling') {
+    const result = await waitForSpeechReady(provider.id);
+    return { ...result, preparedNow: true };
+  }
+  if (phase === 'failed') throw new Error(provider.preparation?.message || '语音模型准备失败');
+  if (phase === 'unprepared' || phase === 'cancelled') {
+    const bytes = provider.setupEstimate?.recommendedDiskBytes;
+    const size = bytes ? `约 ${formatBytes(bytes)}` : '约 239MB';
+    if (!confirm(`首次使用需要下载本地 SenseVoice 语音模型（${size}），继续吗？`)) {
+      throw new Error('cancelled');
+    }
+    state.voiceAbort = false;
+    setVoiceStatus('正在准备语音模型…', true);
+    await apiRpc('speech', 'prepare', { providerId: provider.id, options: {} });
+    const result = await waitForSpeechReady(provider.id);
+    return { ...result, preparedNow: true };
+  }
+  throw new Error(`未知的语音准备状态：${phase || '空'}`);
+}
+
+function encodeWave(samples) {
+  const bytes = new Uint8Array(44 + samples.length * 2);
+  const view = new DataView(bytes.buffer);
+  const text = (at, value) => {
+    for (let i = 0; i < value.length; i++) bytes[at + i] = value.charCodeAt(i);
+  };
+  text(0, 'RIFF');
+  view.setUint32(4, bytes.length - 8, true);
+  text(8, 'WAVE');
+  text(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 16000, true);
+  view.setUint32(28, 32000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  text(36, 'data');
+  view.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) {
+    const value = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(44 + i * 2, Math.round(value * (value < 0 ? 32768 : 32767)), true);
+  }
+  return bytes;
+}
+
+function audioBase64(bytes) {
+  let text = '';
+  for (let i = 0; i < bytes.length; i += 8192) {
+    text += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  }
+  return btoa(text);
+}
+
+async function blobToWav(blob, maxDurationSeconds) {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!Ctx || !Offline) throw new Error('浏览器不支持音频处理');
+  const context = new Ctx();
+  let decoded;
+  try {
+    decoded = await context.decodeAudioData(await blob.arrayBuffer());
+  } finally {
+    try { await context.close(); } catch {}
+  }
+  if (!decoded || !decoded.duration) throw new Error('录音为空');
+  const duration = Math.min(decoded.duration, maxDurationSeconds || 120);
+  const offline = new Offline(1, Math.max(1, Math.floor(duration * 16000)), 16000);
+  const source = offline.createBufferSource();
+  source.buffer = decoded;
+  source.connect(offline.destination);
+  source.start(0);
+  const rendered = await offline.startRendering();
+  return encodeWave(rendered.getChannelData(0));
+}
+
+function insertTranscript(text) {
+  const target = document.getElementById('promptInput');
+  if (!target || !text) return;
+  const start = Number.isInteger(target.selectionStart) ? target.selectionStart : target.value.length;
+  const end = Number.isInteger(target.selectionEnd) ? target.selectionEnd : start;
+  const before = target.value.slice(0, start);
+  const after = target.value.slice(end);
+  const left = before && !/\s$/.test(before) ? before + ' ' : before;
+  const right = after && !/^\s/.test(after) ? ' ' + after : after;
+  target.value = left + text + right;
+  const pos = left.length + text.length;
+  target.focus();
+  target.setSelectionRange(pos, pos);
+  target.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function cleanupVoice() {
+  if (state.voiceTimer) {
+    clearInterval(state.voiceTimer);
+    state.voiceTimer = null;
+  }
+  if (state.voiceStream) {
+    try { state.voiceStream.getTracks().forEach((t) => t.stop()); } catch {}
+  }
+  state.voiceStream = null;
+  state.voiceRecorder = null;
+  state.voiceChunks = [];
+  state.voiceRecording = false;
+}
+
+async function startVoiceRecording() {
+  if (state.voiceBusy || state.voiceRecording) return;
+  if (!window.isSecureContext) {
+    alert('语音输入需要 HTTPS 页面（localhost 除外）');
+    return;
+  }
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+    alert('当前浏览器不支持麦克风录音');
+    return;
+  }
+  if (!state.speechAvailable) {
+    const catalog = await loadSpeechCatalog(true);
+    if (!catalog) {
+      alert('语音服务尚未加载。语音 Bundle 已安装，请重启 DSH Web 后刷新此页面再试。');
+      return;
+    }
+  }
+
+  state.voiceBusy = true;
+  state.voiceAbort = false;
+  updateVoiceButton();
+  try {
+    const ready = await ensureSpeechReady();
+    if (state.voiceAbort) throw new Error('cancelled');
+    if (ready.preparedNow) {
+      cleanupVoice();
+      state.voiceBusy = false;
+      setVoiceStatus('语音模型已就绪，请再点一次麦克风', false);
+      updateVoiceButton();
+      setTimeout(() => {
+        if (!state.voiceBusy && !state.voiceRecording) setVoiceStatus('');
+      }, 3000);
+      return;
+    }
+    state.voiceProviderId = ready.provider?.id || state.voiceProviderId;
+    state.voiceMaxDuration = ready.catalog?.maxDurationSeconds || state.voiceMaxDuration || 120;
+    setVoiceStatus('正在打开麦克风…', true);
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true },
+      video: false,
+    });
+    if (state.voiceAbort) {
+      stream.getTracks().forEach((t) => t.stop());
+      throw new Error('cancelled');
+    }
+
+    const recorder = new MediaRecorder(stream);
+    state.voiceStream = stream;
+    state.voiceRecorder = recorder;
+    state.voiceChunks = [];
+    recorder.ondataavailable = (event) => {
+      if (event.data && event.data.size > 0) state.voiceChunks.push(event.data);
+    };
+    recorder.onerror = () => {
+      setVoiceStatus('录音失败', false);
+      cancelVoice();
+    };
+    recorder.start(250);
+
+    state.voiceRecording = true;
+    state.voiceStartedAt = Date.now();
+    const max = state.voiceMaxDuration;
+    setVoiceStatus(`录音中 0:00 / ${formatDuration(max)}`, true);
+    state.voiceTimer = setInterval(() => {
+      const sec = (Date.now() - state.voiceStartedAt) / 1000;
+      setVoiceStatus(`录音中 ${formatDuration(sec)} / ${formatDuration(max)}`, true);
+      if (sec >= max) stopVoiceRecording(false);
+    }, 500);
+    updateVoiceButton();
+  } catch (e) {
+    cleanupVoice();
+    state.voiceBusy = false;
+    setVoiceStatus('');
+    updateVoiceButton();
+    if (e.message !== 'cancelled') alert('语音输入失败：' + e.message);
+  }
+}
+
+async function stopVoiceRecording(cancelled) {
+  const recorder = state.voiceRecorder;
+  const stream = state.voiceStream;
+  if (!recorder) {
+    cleanupVoice();
+    state.voiceBusy = false;
+    updateVoiceButton();
+    return;
+  }
+  if (state.voiceTimer) {
+    clearInterval(state.voiceTimer);
+    state.voiceTimer = null;
+  }
+  state.voiceRecording = false;
+
+  await new Promise((resolve) => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+    recorder.onstop = finish;
+    try { recorder.stop(); } catch { finish(); }
+    setTimeout(finish, 3000);
+  });
+  if (stream) {
+    try { stream.getTracks().forEach((t) => t.stop()); } catch {}
+  }
+
+  if (cancelled) {
+    cleanupVoice();
+    state.voiceBusy = false;
+    setVoiceStatus('');
+    updateVoiceButton();
+    return;
+  }
+
+  const chunks = state.voiceChunks.slice();
+  const mimeType = recorder.mimeType || 'audio/webm';
+  cleanupVoice();
+  state.voiceBusy = true;
+  state.voiceTranscribing = true;
+  setVoiceStatus('正在识别语音…', false);
+  updateVoiceButton();
+
+  try {
+    const blob = new Blob(chunks, { type: mimeType });
+    if (!blob.size) throw new Error('没有录到声音');
+    const wav = await blobToWav(blob, state.voiceMaxDuration);
+    if (state.speechCatalog?.maxAudioBytes && wav.length > state.speechCatalog.maxAudioBytes) {
+      throw new Error('录音过长，超过语音接口大小限制');
+    }
+    const request = { audioBase64: audioBase64(wav) };
+    if (state.voiceProviderId) request.providerId = state.voiceProviderId;
+    if (state.voiceLanguage) request.language = state.voiceLanguage;
+    const result = await apiRpc('speech', 'transcribe', { request });
+    const text = String(result?.text || '').trim();
+    if (!text) throw new Error('没有识别到文字');
+    insertTranscript(text);
+    setVoiceStatus('已插入识别文字', false);
+    setTimeout(() => {
+      if (!state.voiceBusy && !state.voiceRecording) setVoiceStatus('');
+    }, 1500);
+  } catch (e) {
+    alert('语音识别失败：' + e.message);
+    setVoiceStatus('');
+  } finally {
+    state.voiceBusy = false;
+    state.voiceTranscribing = false;
+    cleanupVoice();
+    updateVoiceButton();
+  }
+}
+
+function cancelVoice() {
+  if (state.voiceTranscribing) return;
+  state.voiceAbort = true;
+  if (state.voiceRecording) {
+    stopVoiceRecording(true);
+    return;
+  }
+  if (state.voiceBusy) {
+    const providerId = state.voiceProviderId;
+    if (providerId) {
+      apiRpc('speech', 'cancelPreparation', { providerId }).catch(() => {});
+    }
+    cleanupVoice();
+    state.voiceBusy = false;
+    setVoiceStatus('');
+    updateVoiceButton();
+  }
+}
+
+function toggleVoice() {
+  if (state.voiceRecording) {
+    stopVoiceRecording(false);
+  } else if (!state.voiceBusy) {
+    startVoiceRecording();
+  }
+}
+
+// ============================================================
+// 深度解析
+// ============================================================
+function parseToolArgs(rawArgs) {
+  let args = rawArgs;
+  for (let i = 0; i < 5; i++) {
+    if (typeof args === 'string') {
+      const trimmed = args.trim();
+      if (!trimmed.startsWith('{') && !trimmed.startsWith('[') && !trimmed.startsWith('"')) break;
+      try { args = JSON.parse(trimmed); } 
+      catch (e) {
+        try { args = JSON.parse(args.replace(/\\"/g, '"').replace(/\\\\/g, '\\')); } 
+        catch { break; }
+      }
+    } else break;
+  }
+  return args || {};
+}
+
+function extractToolParams(args) {
+  let desc = '';
+  let detail = '';
+  if (typeof args === 'object' && args !== null) {
+    desc = args.description || args.reason || '';
+    if (args.command) detail = `$ ${args.command}`;
+    else if (args.file_path) detail = `📄 ${args.file_path}`;
+    else if (args.path) detail = `📁 ${args.path}`;
+    else if (args.pattern) detail = `🔍 ${args.pattern}`;
+    else if (args.query) detail = `🔍 ${args.query}`;
+    else if (args.name) detail = `🏷️ ${args.name}`;
+    else if (args.script) detail = `$ ${args.script}`;
+    else {
+      const str = JSON.stringify(args);
+      detail = str === '{}' ? '' : str;
+    }
+  } else if (typeof args === 'string') {
+    detail = args;
+  }
+  return { desc, detail };
+}
+
+function fillToolOutput(card) {
+  const outEl = card.querySelector('.tool-output');
+  if (!outEl || outEl.dataset.filled === '1' || card._toolOutput === undefined) return;
+  outEl.style.display = 'block';
+  outEl.textContent = card._toolOutput || '(无输出)';
+  outEl.dataset.filled = '1';
+}
+
+function createToolCard(name, rawArgs, statusText) {
+  const args = parseToolArgs(rawArgs);
+  const { desc, detail } = extractToolParams(args);
+
+  const headerText = [name, desc, detail].filter(Boolean).join(' - ');
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'msg tool-group';
+  wrapper.innerHTML = `
+    <div class="tool-header">
+      <span>🔧</span>
+      <span class="tool-title" title="${escapeHtml(headerText)}">${escapeHtml(headerText)}</span>
+      <span class="tool-status">${statusText}</span>
+      <span class="tool-caret">▸</span>
+    </div>
+    <div class="tool-body">
+      ${detail ? `<div class="tool-cmd">${escapeHtml(detail)}</div>` : ''}
+      <div class="tool-output" style="display:none"></div>
+    </div>
+  `;
+  wrapper.querySelector('.tool-header').onclick = () => {
+    wrapper.classList.toggle('expanded');
+    fillToolOutput(wrapper);
+  };
+  return wrapper;
+}
+
+function extractText(obj) {
+  if (obj === null || obj === undefined) return '';
+  if (typeof obj === 'string') {
+    const trimmed = obj.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[') || trimmed.startsWith('"')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return extractText(parsed);
+      } catch { return obj; }
+    }
+    return obj;
+  }
+  if (Array.isArray(obj)) return obj.map(extractText).join('\n');
+  if (typeof obj === 'object') {
+    if (obj.type === 'text' && typeof obj.text === 'string') return obj.text;
+    if (obj.output) return extractText(obj.output);
+    if (obj.result) return extractText(obj.result);
+    if (obj.content) return extractText(obj.content);
+    if (obj.text) return extractText(obj.text);
+    if (obj.stdout || obj.stderr) return `${obj.stdout || ''}\n${obj.stderr || ''}`.trim();
+    if (obj.file_contents) return extractText(obj.file_contents);
+    const str = JSON.stringify(obj, null, 2);
+    if (str === '{}') return '';
+    return str;
+  }
+  return String(obj);
+}
+
+// ============================================================
+// 历史加载与事件流
+// ============================================================
+function setToolResult(card, output) {
+  card.querySelector('.tool-status').textContent = '已完成';
+  // 工具结果默认折叠，只有用户点击卡片后才把大段输出写进 DOM 并展开。
+  card._toolOutput = output || '(无输出)';
+  if (card.classList.contains('expanded')) fillToolOutput(card);
+}
+
+function createOrphanToolResult(output) {
+  const fallback = document.createElement('div');
+  fallback.className = 'msg tool-group';
+  fallback.innerHTML = `
+    <div class="tool-header">
+      <span>↳</span>
+      <span class="tool-title">工具输出</span>
+      <span class="tool-status">已完成</span>
+      <span class="tool-caret">▸</span>
+    </div>
+    <div class="tool-body"><div class="tool-output"></div></div>
+  `;
+  fallback._toolOutput = output || '(无输出)';
+  fallback.querySelector('.tool-header').onclick = () => {
+    fallback.classList.toggle('expanded');
+    fillToolOutput(fallback);
+  };
+  return fallback;
+}
+
+// 发送后先本地回显，真实 user/message 事件到达时用 requestId 精确替换。
+function appendPendingUserEcho(text, images, requestId) {
+  const el = document.getElementById('messages');
+  const empty = el.querySelector('.empty');
+  if (empty) empty.remove();
+  const div = document.createElement('div');
+  div.className = 'msg user pending';
+  if (text) {
+    const t = document.createElement('div');
+    t.className = 'msg-text';
+    t.innerHTML = renderMarkdown(text);
+    div.appendChild(t);
+  }
+  if (images && images.length) {
+    const wrap = document.createElement('div');
+    wrap.className = 'msg-images';
+    for (const img of images) appendImageThumb(wrap, img, null);
+    div.appendChild(wrap);
+  }
+  el.appendChild(div);
+  const entry = {
+    text,
+    requestId,
+    node: div,
+    at: Date.now(),
+    previewUrls: (images || []).map((x) => x.previewUrl).filter(Boolean),
+  };
+  state.pendingUserEchoes.push(entry);
+  scrollBottom();
+  return entry;
+}
+
+function removePendingUserEcho(entry) {
+  if (!entry) return;
+  try { entry.node.remove(); } catch {}
+  for (const url of entry.previewUrls || []) {
+    try { URL.revokeObjectURL(url); } catch {}
+  }
+  const i = state.pendingUserEchoes.indexOf(entry);
+  if (i >= 0) state.pendingUserEchoes.splice(i, 1);
+}
+
+function consumePendingUserEcho(rpcId, text) {
+  const list = state.pendingUserEchoes;
+  let entry = null;
+  if (rpcId) entry = list.find((x) => x.requestId === rpcId) || null;
+  if (!entry && text) entry = list.find((x) => x.text === text) || null;
+  if (!entry) return false;
+  removePendingUserEcho(entry);
+  return true;
+}
+
+function prunePendingUserEchoes() {
+  const now = Date.now();
+  for (let i = state.pendingUserEchoes.length - 1; i >= 0; i--) {
+    if (now - state.pendingUserEchoes[i].at > 10 * 60 * 1000) {
+      removePendingUserEcho(state.pendingUserEchoes[i]);
+    }
+  }
+}
+
+// 一条 user/message 可能同时包含文字和图片，合并到一个气泡里。
+function renderUserMessageEvent(ev, container) {
+  const content = ev.data?.content;
+  if (!Array.isArray(content)) return 0;
+  const texts = [];
+  const images = [];
+  for (const part of content) {
+    if (part?.type === 'text' && part.text?.trim()) {
+      if (part.text.startsWith('Current runtime context')) continue;
+      texts.push(part.text);
+    } else if (part?.type === 'image') {
+      images.push(part);
+    }
+  }
+  if (!texts.length && !images.length) return 0;
+
+  const rpcId = ev.data?.source?.rpcId;
+  consumePendingUserEcho(rpcId, texts[0] || '');
+
+  const div = document.createElement('div');
+  div.className = 'msg user';
+  for (const text of texts) {
+    const t = document.createElement('div');
+    t.className = 'msg-text';
+    t.innerHTML = renderMarkdown(text);
+    div.appendChild(t);
+  }
+  if (images.length) {
+    const wrap = document.createElement('div');
+    wrap.className = 'msg-images';
+    for (const part of images) appendImageThumb(wrap, part, state.currentSessionId);
+    div.appendChild(wrap);
+  }
+  container.appendChild(div);
+  return texts.length + images.length;
+}
+
+function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(text).then(() => true).catch(() => false);
+  }
+  return Promise.resolve(false);
+}
+
+async function copyAssistantText(text, btn) {
+  const label = btn.textContent;
+  let ok = await copyTextToClipboard(text);
+  if (!ok) {
+    // file:// 或非安全上下文下 Clipboard API 可能不可用，退回 textarea
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.top = '-1000px';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    ta.remove();
+  }
+  btn.textContent = ok ? '已复制' : '复制失败';
+  btn.disabled = true;
+  setTimeout(() => {
+    btn.textContent = label;
+    btn.disabled = false;
+  }, 1200);
+}
+
+async function forkAtAssistantEvent(ev, btn) {
+  const sessionId = state.currentSessionId;
+  const atSeq = ev?.seq;
+  if (!sessionId) { alert('当前没有会话'); return; }
+  if (!Number.isSafeInteger(atSeq)) { alert('该回复没有可用的 seq，无法分叉'); return; }
+
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '分叉中…';
+  try {
+    const result = await apiRpc('session', 'fork', {
+      request: { sessionId, atSeq },
+    });
+    const newSessionId = result?.sessionId;
+    if (!newSessionId) throw new Error('分叉未返回 sessionId');
+
+    btn.textContent = '已分叉';
+    await loadTasks();
+    await loadWorkspaces();
+    await selectTask(newSessionId);
+  } catch (e) {
+    alert('分叉失败：' + e.message);
+    btn.textContent = label;
+    btn.disabled = false;
+  }
+}
+
+function createAssistantMessage(text, ev) {
+  const div = document.createElement('div');
+  div.className = 'msg assistant';
+
+  const body = document.createElement('div');
+  body.className = 'msg-body';
+  body.innerHTML = renderMarkdown(text);
+  div.appendChild(body);
+
+  const actions = document.createElement('div');
+  actions.className = 'msg-actions';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'msg-action';
+  copyBtn.textContent = '复制';
+  copyBtn.title = '复制这条回复的原文';
+  copyBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    copyAssistantText(text, copyBtn);
+  });
+
+  const forkBtn = document.createElement('button');
+  forkBtn.type = 'button';
+  forkBtn.className = 'msg-action';
+  forkBtn.textContent = '分叉';
+  forkBtn.title = Number.isSafeInteger(ev?.seq)
+    ? `从这条回复分叉新会话（seq ${ev.seq}）`
+    : '该回复没有可用的 seq，无法分叉';
+  forkBtn.disabled = !Number.isSafeInteger(ev?.seq);
+  forkBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    forkAtAssistantEvent(ev, forkBtn);
+  });
+
+  actions.appendChild(copyBtn);
+  actions.appendChild(forkBtn);
+  div.appendChild(actions);
+  return div;
+}
+
+// 把一批 records 按顺序渲染到 container。返回首/尾 seq，供分页游标使用。
+// countStats 只用于“投影不可用”时的退化为逐事件累加。
+function renderHistoryRecords(records, container, options) {
+  const opts = options || {};
+  let rendered = 0;
+  let minSeq = null;
+  let maxSeq = null;
+
+  for (const rec of records) {
+    if (rec?.type !== 'event') continue;
+    const ev = rec.event;
+    if (!ev) continue;
+    if (typeof ev.seq === 'number') {
+      if (minSeq === null || ev.seq < minSeq) minSeq = ev.seq;
+      if (maxSeq === null || ev.seq > maxSeq) maxSeq = ev.seq;
+    }
+
+    if (ev.type === 'user/message') {
+      rendered += renderUserMessageEvent(ev, container);
+    }
+    else if (ev.type === 'assistant/message') {
+      if (opts.countStats) {
+        // 退化路径：没有投影时按事件累加，usage 只取 data.usage 一份
+        const u = ev.data?.usage;
+        if (u) {
+          state.totalTokens += u.totalTokens
+            ?? ((u.inputTokens || 0) + (u.outputTokens || 0) + (u.cacheReadTokens || 0) + (u.cacheWriteTokens || 0));
+        }
+        state.totalSteps++;
+        state.totalTurns = Math.max(state.totalTurns, ev.data?.turn || 0);
+      }
+
+      const content = ev.data?.message?.content || ev.data?.content;
+      if (Array.isArray(content)) {
+        for (const part of content) {
+          if (part.type === 'text' && part.text?.trim()) {
+            container.appendChild(createAssistantMessage(part.text, ev));
+            rendered++;
+          }
+        }
+      } else if (typeof ev.data?.text === 'string' && ev.data.text.trim()) {
+        container.appendChild(createAssistantMessage(ev.data.text, ev));
+        rendered++;
+      }
+    }
+    else if (ev.type === 'tool/call') {
+      const d = ev.data || {};
+      const name = d.name || d.toolName || 'tool';
+      const args = d.input || d.arguments || d;
+      const callId = d.callId || d.id || d.toolCallId;
+
+      const card = createToolCard(name, args, '执行中...');
+      if (callId) {
+        state.toolCallNodes.set(callId, card);
+        // 如果更早的页里先渲染过 tool/result（call 在旧页），现在把输出挂回真正的卡片
+        const orphan = state.orphanToolResults.get(callId);
+        if (orphan) {
+          setToolResult(card, orphan.output);
+          orphan.node.remove();
+          state.orphanToolResults.delete(callId);
+        }
+      }
+      container.appendChild(card); rendered++;
+    }
+    else if (ev.type === 'tool/result') {
+      const d = ev.data || {};
+      const callId = d.callId || d.id || d.toolCallId;
+      const output = extractText(d);
+
+      const card = callId ? state.toolCallNodes.get(callId) : null;
+      if (card) {
+        setToolResult(card, output);
+      } else {
+        const fallback = createOrphanToolResult(output);
+        if (callId) {
+          const old = state.orphanToolResults.get(callId);
+          if (old) old.node.remove();
+          state.orphanToolResults.set(callId, { node: fallback, output });
+        }
+        container.appendChild(fallback);
+      }
+      rendered++;
+    }
+  }
+
+  return { rendered, minSeq, maxSeq };
+}
+
+function updateHistoryMoreBar() {
+  const el = document.getElementById('messages');
+  const h = state.history;
+  let bar = document.getElementById('historyMore');
+
+  if (!h || !h.hasMore) {
+    if (bar) bar.remove();
+    return;
+  }
+
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'historyMore';
+    bar.className = 'history-more';
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.addEventListener('click', () => { loadOlderHistory(); });
+    bar.appendChild(btn);
+    el.insertBefore(bar, el.firstChild);
+  }
+
+  const btn = bar.querySelector('button');
+  if (btn) {
+    btn.disabled = !!h.loading;
+    btn.textContent = h.loading ? '加载中…' : '↑ 加载更早消息';
+  }
+}
+
+// 向上翻页：beforeSeq 是当前最早已渲染事件，page 返回它之前的一页。
+async function loadOlderHistory() {
+  const h = state.history;
+  if (!h || !h.hasMore || h.loading) return;
+
+  const sessionId = h.sessionId;
+  const el = document.getElementById('messages');
+  const oldHeight = el.scrollHeight;
+  const oldTop = el.scrollTop;
+  const oldBefore = h.beforeSeq;
+
+  h.loading = true;
+  updateHistoryMoreBar();
+  try {
+    const page = await apiRpc('session', 'page', {
+      request: {
+        address: { kind: 'session', sessionId },
+        throughSeq: h.throughSeq,
+        beforeSeq: oldBefore,
+        maxMessages: HISTORY_PAGE_MESSAGES,
+      },
+    });
+
+    if (state.history !== h || state.currentSessionId !== sessionId) return;
+
+    const records = Array.isArray(page?.records) ? page.records : [];
+    const frag = document.createDocumentFragment();
+    const result = renderHistoryRecords(records, frag, { countStats: false });
+
+    const bar = document.getElementById('historyMore');
+    el.insertBefore(frag, bar ? bar.nextSibling : el.firstChild);
+
+    if (result.minSeq !== null && result.minSeq < oldBefore) h.beforeSeq = result.minSeq;
+    // 空页或游标未前进但服务端仍说 hasMore 时，停止，避免死循环
+    h.hasMore = !!page?.hasMore && records.length > 0 && h.beforeSeq < oldBefore;
+
+    // 保持用户当前正在看的内容位置不跳动
+    el.scrollTop = oldTop + (el.scrollHeight - oldHeight);
+  } catch (e) {
+    console.error('[loadOlderHistory] failed:', e);
+    const bar = document.getElementById('historyMore');
+    const btn = bar?.querySelector('button');
+    if (btn) btn.title = '加载失败：' + e.message;
+  } finally {
+    if (state.history === h) {
+      h.loading = false;
+      updateHistoryMoreBar();
+    }
+  }
+}
+
+async function loadHistory(sessionId) {
+  const el = document.getElementById('messages');
+  const h = state.history;
+  if (!h || h.sessionId !== sessionId) return;
+
+  h.loading = true;
+  try {
+    const proj = await apiRpc('session', 'projections', { request: { sessionId } });
+    if (state.currentSessionId !== sessionId || state.history !== h) return;
+
+    const asOfSeq = Number.isSafeInteger(proj?.asOfSeq) ? proj.asOfSeq : -1;
+
+    // 统计口径与官方界面一致：token 取 tokenUsage 投影，轮/步取 sessionStats。
+    // 注意：每个 assistant/message 的 usage 在 data.usage 和 data.stream 的 usage chunk
+    // 里各存了一份，逐层遍历求和会正好翻倍（4226472 = 2 × 2113236）。
+    const statsFromProjection = applyProjectionStats(proj);
+    updateStatsUI();
+
+    if (asOfSeq < 0) {
+      el.innerHTML = '<div class="empty">（空会话）</div>';
+      h.throughSeq = -1;
+      h.hasMore = false;
+      state.lastSeq = -1;
+      updateHistoryMoreBar();
+      return;
+    }
+
+    let page;
+    try {
+      page = await apiRpc('session', 'page', {
+        request: {
+          address: { kind: 'session', sessionId },
+          throughSeq: asOfSeq,
+          maxMessages: HISTORY_PAGE_MESSAGES,
+        },
+      });
+    } catch (e) {
+      // 空日志的 cursor 是 -1；个别版本/竞态下可能仍报越界，按空会话处理
+      if (asOfSeq === 0) {
+        el.innerHTML = '<div class="empty">（空会话）</div>';
+        h.throughSeq = -1;
+        h.hasMore = false;
+        state.lastSeq = -1;
+        updateHistoryMoreBar();
+        return;
+      }
+      throw e;
+    }
+
+    if (state.currentSessionId !== sessionId || state.history !== h) return;
+
+    const records = Array.isArray(page?.records) ? page.records : [];
+    el.innerHTML = '';
+    const frag = document.createDocumentFragment();
+    const result = renderHistoryRecords(records, frag, { countStats: !statsFromProjection });
+    el.appendChild(frag);
+
+    h.throughSeq = asOfSeq;
+    h.beforeSeq = result.minSeq ?? 0;
+    h.hasMore = !!page?.hasMore && result.minSeq !== null && records.length > 0;
+
+    // 投影已覆盖到 asOfSeq，SSE 重放时把 ≤ asOfSeq 的帧全部丢弃，避免重复计数。
+    // 用 asOfSeq 而不是 maxSeq：分页截断时 maxSeq 会小于真实游标。
+    state.lastSeq = asOfSeq;
+    updateStatsUI();
+    updateHistoryMoreBar();
+
+    if (result.rendered === 0) {
+      el.innerHTML = '<div class="empty">（暂无消息，发一条提示词试试）</div>';
+      h.hasMore = false;
+      updateHistoryMoreBar();
+    }
+    scrollBottom();
+  } catch (e) {
+    if (state.currentSessionId !== sessionId || state.history !== h) return;
+    console.error('[loadHistory] failed:', e);
+    el.innerHTML = `<div class="empty">加载失败：${escapeHtml(e.message)}</div>`;
+    h.hasMore = false;
+    updateHistoryMoreBar();
+  } finally {
+    if (state.history === h) {
+      h.loading = false;
+      updateHistoryMoreBar();
+    }
+  }
+}
+
+// 从 sinceSeq 之后补齐事件。page 只能向后翻，所以从最新一页往前翻到覆盖游标为止。
+async function fetchEventsSince(sessionId, throughSeq, sinceSeq) {
+  let records = [];
+  let beforeSeq;
+  // lastSeq 未知时最多只取最新一页，避免把整个历史都扫一遍
+  const maxPages = sinceSeq < 0 ? 1 : 40;
+  for (let i = 0; i < maxPages; i++) {
+    const request = {
+      address: { kind: 'session', sessionId },
+      throughSeq,
+      maxMessages: POLL_PAGE_MESSAGES,
+    };
+    if (beforeSeq !== undefined) request.beforeSeq = beforeSeq;
+    const page = await apiRpc('session', 'page', { request });
+    const recs = Array.isArray(page?.records) ? page.records : [];
+    if (!recs.length) break;
+    records = recs.concat(records);
+
+    let minSeq = null;
+    for (const rec of recs) {
+      const s = rec?.event?.seq;
+      if (Number.isSafeInteger(s) && (minSeq === null || s < minSeq)) minSeq = s;
+    }
+    if (minSeq === null || minSeq <= sinceSeq || !page?.hasMore) break;
+    beforeSeq = minSeq;
+  }
+  return records;
+}
+
+async function pollSession(sessionId) {
+  if (!sessionId || state.currentSessionId !== sessionId) return;
+  if (state.pollBusy || document.hidden) return;
+
+  state.pollBusy = true;
+  try {
+    prunePendingUserEchoes();
+
+    const proj = await apiRpc('session', 'projections', { request: { sessionId } });
+    if (state.currentSessionId !== sessionId) return;
+    const asOfSeq = Number.isSafeInteger(proj?.asOfSeq) ? proj.asOfSeq : -1;
+
+    if (asOfSeq > state.lastSeq) {
+      const records = await fetchEventsSince(sessionId, asOfSeq, state.lastSeq);
+      if (state.currentSessionId !== sessionId) return;
+
+      // SSE 可能在请求期间已经渲染了一部分，这里再按当前 lastSeq 过滤一次
+      const fresh = records.filter((rec) => {
+        const seq = rec?.event?.seq;
+        return rec?.type === 'event' && rec.event && Number.isSafeInteger(seq) && seq > state.lastSeq;
+      });
+
+      if (fresh.length) {
+        const el = document.getElementById('messages');
+        const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+        const empty = el.querySelector('.empty');
+        if (empty) empty.remove();
+        const frag = document.createDocumentFragment();
+        renderHistoryRecords(fresh, frag, { countStats: false });
+        el.appendChild(frag);
+        if (atBottom) scrollBottom();
+      }
+      if (asOfSeq > state.lastSeq) state.lastSeq = asOfSeq;
+    }
+
+    if (applyProjectionStats(proj)) updateStatsUI();
+  } catch (e) {
+    console.warn('[pollSession] failed:', e);
+  } finally {
+    state.pollBusy = false;
+  }
+}
+
+function taskIsActive(sessionId) {
+  const t = state.tasks.find((x) => x.sessionId === sessionId);
+  return !!t && (t.running === true || t.status === 'running' || t.status === 'waiting-approval');
+}
+
+function startPolling(sessionId) {
+  stopPolling();
+  const tick = async () => {
+    if (state.currentSessionId !== sessionId) return;
+    await pollSession(sessionId);
+    if (state.currentSessionId !== sessionId) return;
+    const active = taskIsActive(sessionId)
+      || state.pendingUserEchoes.length > 0
+      || Date.now() < state.pollFastUntil;
+    state.pollTimer = setTimeout(tick, active ? POLL_INTERVAL_MS : POLL_IDLE_INTERVAL_MS);
+  };
+  state.pollTimer = setTimeout(tick, 300);
+  pollSession(sessionId);
+}
+
+function stopPolling() {
+  if (state.pollTimer) {
+    clearTimeout(state.pollTimer);
+    state.pollTimer = null;
+  }
+  state.pollBusy = false;
+}
+
+function openSse(sessionId) {
+  // maxMessages=1：只让 follow 的初始 snapshot 带 1 条消息。
+  // 历史由 loadHistory/loadOlderHistory 分页拉取；SSE 只负责 cursor 之后的新事件。
+  // 用通用流式路由（参数走 args），这样不必改服务端就能缩小 snapshot。
+  const args = { request: { address: { kind: 'session', sessionId }, maxMessages: 1 } };
+  const url = `${BASE}/api/stream/session.follow?args=${encodeURIComponent(JSON.stringify(args))}`;
+  const es = new EventSource(url);
+  state.sse = es;
+  es.onmessage = (ev) => { try { handleFrame(JSON.parse(ev.data)); } catch (e) {} };
+}
+
+// SSE 重连/首连的 snapshot：只补发“历史分页游标之后”的缺口事件，避免重复渲染旧消息。
+function handleSnapshotFrame(frame) {
+  const cursor = Number.isSafeInteger(frame.cursor) ? frame.cursor : state.lastSeq;
+  if (cursor <= state.lastSeq) return;
+
+  const records = Array.isArray(frame.records) ? frame.records : [];
+  if (!records.length) {
+    state.lastSeq = Math.max(state.lastSeq, cursor);
+    return;
+  }
+
+  // 如果 snapshot 的最早事件已经晚于 lastSeq+1，说明中间有缺口；
+  // 不要直接跳到 cursor，交给 pollSession 用 page 补齐。
+  let minSeq = null;
+  for (const rec of records) {
+    const seq = rec?.event?.seq;
+    if (Number.isSafeInteger(seq) && (minSeq === null || seq < minSeq)) minSeq = seq;
+  }
+  if (state.lastSeq >= 0 && minSeq !== null && minSeq > state.lastSeq + 1) return;
+
+  const fresh = records.filter((rec) => {
+    const seq = rec?.event?.seq;
+    return rec?.type === 'event' && rec.event && Number.isSafeInteger(seq) && seq > state.lastSeq;
+  });
+
+  if (fresh.length) {
+    const el = document.getElementById('messages');
+    const empty = el.querySelector('.empty');
+    if (empty) empty.remove();
+    const frag = document.createDocumentFragment();
+    renderHistoryRecords(fresh, frag, { countStats: false });
+    el.appendChild(frag);
+    scrollBottom();
+  }
+  state.lastSeq = Math.max(state.lastSeq, cursor);
+}
+
+function handleFrame(frame) {
+  if (frame.type === 'snapshot') { handleSnapshotFrame(frame); return; }
+  if (frame.type !== 'event' || !frame.event) return;
+  const ev = frame.event;
+  if (typeof ev.seq === 'number' && ev.seq <= state.lastSeq) return;
+  if (typeof ev.seq === 'number') state.lastSeq = ev.seq;
+
+  const el = document.getElementById('messages');
+  const empty = el.querySelector('.empty');
+  if (empty) empty.remove();
+
+  if (ev.type === 'turn/start') {
+    state.totalTurns++;
+    updateStatsUI();
+  }
+  else if (ev.type === 'step/start') {
+    state.totalSteps++;
+    updateStatsUI();
+  }
+  else if (ev.type === 'turn/end') {
+    // turn 结束后用投影校准，消除实时累加的误差
+    refreshStats(state.currentSessionId);
+  }
+  else if (ev.type === 'user/message') {
+    renderUserMessageEvent(ev, el);
+    scrollBottom();
+  } 
+  else if (ev.type === 'assistant/message') {
+    // usage 在事件里有两份（data.usage + stream 里的 usage chunk），只累加 data.usage 一次
+    const u = ev.data?.usage;
+    if (u) {
+      state.totalTokens += u.totalTokens
+        ?? ((u.inputTokens || 0) + (u.outputTokens || 0) + (u.cacheReadTokens || 0) + (u.cacheWriteTokens || 0));
+    }
+    updateStatsUI();
+
+    const content = ev.data?.message?.content || ev.data?.content;
+    if (Array.isArray(content)) {
+      for (const part of content) {
+        if (part.type === 'text' && part.text?.trim()) {
+          el.appendChild(createAssistantMessage(part.text, ev));
+        }
+      }
+    } else if (typeof ev.data?.text === 'string' && ev.data.text.trim()) {
+      el.appendChild(createAssistantMessage(ev.data.text, ev));
+    }
+    scrollBottom();
+  } 
+  else if (ev.type === 'tool/call') {
+    const d = ev.data || {};
+    const name = d.name || d.toolName || 'tool';
+    const args = d.input || d.arguments || d;
+    const callId = d.callId || d.id || d.toolCallId;
+
+    const card = createToolCard(name, args, '执行中...');
+    if (callId) {
+      state.toolCallNodes.set(callId, card);
+      const orphan = state.orphanToolResults.get(callId);
+      if (orphan) {
+        setToolResult(card, orphan.output);
+        orphan.node.remove();
+        state.orphanToolResults.delete(callId);
+      }
+    }
+    el.appendChild(card);
+    scrollBottom();
+  } 
+  else if (ev.type === 'tool/result') {
+    const d = ev.data || {};
+    const callId = d.callId || d.id || d.toolCallId;
+    const output = extractText(d);
+
+    const card = callId ? state.toolCallNodes.get(callId) : null;
+    if (card) {
+      setToolResult(card, output);
+    } else {
+      const fallback = createOrphanToolResult(output);
+      if (callId) {
+        const old = state.orphanToolResults.get(callId);
+        if (old) old.node.remove();
+        state.orphanToolResults.set(callId, { node: fallback, output });
+      }
+      el.appendChild(fallback);
+    }
+    scrollBottom();
+  }
+}
+
+function openNewModal() { document.getElementById('newModal').classList.add('show'); document.getElementById('newPrompt').focus(); }
+function closeNewModal() { document.getElementById('newModal').classList.remove('show'); }
+
+async function createTask() {
+  const cwd = document.getElementById('newCwd').value.trim();
+  const prompt = document.getElementById('newPrompt').value.trim();
+  if (!prompt) { alert('请输入提示词'); return; }
+  const btn = document.getElementById('newCreate');
+  btn.disabled = true; btn.textContent = '创建中...';
+  try {
+    const created = await api('POST', '/api/session/create', { cwd });
+    const sessionId = created.value?.sessionId;
+    if (!sessionId) throw new Error('创建会话未返回 sessionId');
+    await api('POST', '/api/session/prompt', { requestId: crypto.randomUUID(), sessionId, mode: 'queue', content: [{ type: 'text', text: prompt }] });
+    closeNewModal(); document.getElementById('newPrompt').value = '';
+    await loadTasks(); await loadWorkspaces(); await selectTask(sessionId);
+  } catch (e) { alert('创建失败：' + e.message); }
+  finally { btn.disabled = false; btn.textContent = '创建并发送'; }
+}
+
+async function sendPrompt(mode = 'queue') {
+  const input = document.getElementById('promptInput');
+  const text = input.value.trim();
+  const images = state.draftImages.slice();
+  if ((!text && images.length === 0) || !state.currentSessionId) return;
+  const sessionId = state.currentSessionId;
+  const requestId = crypto.randomUUID();
+  const sendBtn = document.getElementById('sendBtn'), steerBtn = document.getElementById('steerBtn');
+  sendBtn.disabled = true; steerBtn.disabled = true;
+  // 先本地回显，避免 HTTP POST / SSE 慢时用户以为没发出去。
+  // pending 图片使用独立的 object URL，发送成功后释放草稿图片不会影响回显。
+  const pendingImages = images.map((img) => ({ name: img.name, previewUrl: URL.createObjectURL(img.file) }));
+  const echo = appendPendingUserEcho(text, pendingImages, requestId);
+  state.pollFastUntil = Date.now() + 30000;
+  try {
+    const content = [];
+    for (const img of images) content.push(await makeImagePart(img.file));
+    if (text) content.push({ type: 'text', text });
+    await api('POST', '/api/session/prompt', { requestId, sessionId, mode, content });
+    input.value = ''; input.style.height = 'auto';
+    removeDraftImages(images);
+    if (state.currentSessionId === sessionId) startPolling(sessionId);
+  } catch (e) {
+    removePendingUserEcho(echo);
+    alert((mode === 'steer' ? '打断' : '发送') + '失败：' + e.message);
+  }
+  finally { sendBtn.disabled = false; steerBtn.disabled = false; input.focus(); }
+}
+
+async function cancelTask() {
+  if (!state.currentSessionId) return;
+  if (!confirm('确定取消当前任务？')) return;
+  try { await api('POST', `/api/tasks/${encodeURIComponent(state.currentSessionId)}/cancel`); await loadTasks(); }
+  catch (e) { alert('取消失败：' + e.message); }
+}
+
+function scrollBottom() { const el = document.getElementById('messages'); el.scrollTop = el.scrollHeight; }
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+function escapeAttr(s) { return escapeHtml(s); }
+function basename(p) { if (!p) return ''; return String(p).split(/[\\/]/).filter(Boolean).pop() || p; }
+function timeAgo(ts) { const diff = Date.now() - ts; if (diff < 60000) return Math.floor(diff / 1000) + ' 秒前'; if (diff < 3600000) return Math.floor(diff / 60000) + ' 分前'; if (diff < 86400000) return Math.floor(diff / 3600000) + ' 时前'; return new Date(ts).toLocaleDateString(); }
+
+document.getElementById('newBtn').onclick = () => {
+  if (!BASE) { openHostModal(); return; }
+  openNewModal();
+};
+document.getElementById('newCancel').onclick = closeNewModal;
+document.getElementById('newCreate').onclick = createTask;
+document.getElementById('refreshBtn').onclick = async () => {
+  if (!BASE) { openHostModal(); return; }
+  await loadTasks();
+  await loadWorkspaces();
+};
+document.getElementById('cancelBtn').onclick = cancelTask;
+document.getElementById('sendBtn').onclick = () => sendPrompt('queue');
+document.getElementById('steerBtn').onclick = () => sendPrompt('steer');
+
+document.getElementById('modelSelect').onchange = () => {
+  updateEffortOptions();
+  applyModelChange();
+};
+document.getElementById('effortSelect').onchange = applyModelChange;
+document.getElementById('modelPickerBtn').onclick = openModelPicker;
+document.getElementById('modelPickerClose').onclick = closeModelPicker;
+document.getElementById('modelPickerModal').addEventListener('click', (e) => {
+  if (e.target.id === 'modelPickerModal') closeModelPicker();
+});
+document.getElementById('modelPickerAddBtn').onclick = openCustomModelModal;
+document.getElementById('cmCancel').onclick = () => closeCustomModelModal();
+document.getElementById('cmSave').onclick = saveCustomModel;
+document.getElementById('cmAddModel').onclick = () => {
+  addCustomModelRow();
+  const rows = document.querySelectorAll('#cmModels .custom-model-row');
+  rows[rows.length - 1]?.querySelector('.cm-model-id')?.focus();
+};
+document.getElementById('customModelModal').addEventListener('click', (e) => {
+  if (e.target.id === 'customModelModal') closeCustomModelModal();
+});
+document.getElementById('cmProvider').addEventListener('input', (e) => {
+  const el = e.target;
+  const start = el.selectionStart;
+  el.value = el.value.toLowerCase();
+  if (typeof start === 'number') el.setSelectionRange(start, start);
+});
+syncModelPickerLabel();
+
+document.getElementById('backBtn').onclick = () => {
+  document.body.classList.remove('showing-main');
+  stopPolling();
+  if (state.sse) { try { state.sse.close(); } catch {} state.sse = null; }
+};
+
+const input = document.getElementById('promptInput');
+input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendPrompt(e.ctrlKey || e.metaKey ? 'steer' : 'queue'); } });
+input.addEventListener('input', () => { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 200) + 'px'; });
+input.addEventListener('paste', (e) => {
+  const files = Array.from(e.clipboardData?.files || []).filter((f) => normalizeImageType(f.type, f.name));
+  if (!files.length) return;
+  e.preventDefault();
+  addDraftImages(files);
+});
+document.getElementById('newPrompt').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); createTask(); } });
+
+const imageInput = document.getElementById('imageInput');
+document.getElementById('imageBtn').onclick = () => imageInput.click();
+imageInput.onchange = () => {
+  addDraftImages(imageInput.files);
+  imageInput.value = '';
+};
+
+document.getElementById('voiceBtn').onclick = () => toggleVoice();
+document.getElementById('voiceCancelBtn').onclick = () => cancelVoice();
+
+// 主机管理 UI
+renderHostSelect();
+document.getElementById('hostManageBtn').onclick = openHostModal;
+document.getElementById('hostCloseBtn').onclick = closeHostModal;
+document.getElementById('hostAddBtn').onclick = () => showHostForm(null);
+document.getElementById('hostFormCancel').onclick = hideHostForm;
+document.getElementById('hostFormSave').onclick = saveHostForm;
+for (const id of ['hostName', 'hostEndpoint', 'hostNote']) {
+  document.getElementById(id).addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); saveHostForm(); }
+  });
+}
+document.getElementById('hostExportBtn').onclick = exportHosts;
+document.getElementById('hostPasteImportBtn').onclick = openPasteImport;
+document.getElementById('hostPasteCancel').onclick = closePasteImport;
+document.getElementById('hostPasteReadBtn').onclick = readClipboardIntoPaste;
+document.getElementById('hostPasteDoBtn').onclick = doPasteImport;
+document.getElementById('hostPasteText').addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    e.preventDefault();
+    doPasteImport();
+  }
+});
+document.getElementById('hostImportBtn').onclick = () => document.getElementById('hostImportInput').click();
+document.getElementById('hostImportInput').onchange = async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  try { importHostsFromText(await file.text()); }
+  catch (err) { alert('导入失败：' + err.message); }
+};
+document.getElementById('hostSelect').onchange = (e) => switchHost(e.target.value);
+document.getElementById('hostModal').addEventListener('click', (e) => {
+  if (e.target.id === 'hostModal') closeHostModal();
+});
+document.getElementById('hostPasteModal').addEventListener('click', (e) => {
+  if (e.target.id === 'hostPasteModal') closePasteImport();
+});
+document.getElementById('hostList').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn) return;
+  const id = btn.getAttribute('data-id');
+  const action = btn.getAttribute('data-action');
+  if (action === 'use') switchHost(id);
+  else if (action === 'edit') {
+    const h = hosts.find((x) => x.id === id);
+    if (h) showHostForm(h);
+  } else if (action === 'delete') deleteHost(id);
+});
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (document.getElementById('customModelModal').classList.contains('show')) {
+    closeCustomModelModal();
+    return;
+  }
+  if (document.getElementById('modelPickerModal').classList.contains('show')) {
+    closeModelPicker();
+    return;
+  }
+  if (document.getElementById('hostPasteModal').classList.contains('show')) {
+    closePasteImport();
+    return;
+  }
+  if (document.getElementById('hostModal').classList.contains('show')) closeHostModal();
+});
+
+const lightbox = document.getElementById('lightbox');
+const lightboxImg = document.getElementById('lightboxImg');
+lightbox.onclick = () => closeLightbox();
+lightboxImg.onclick = (e) => e.stopPropagation();
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLightbox(); });
+
+// 滚到顶部附近自动翻页（顶部按钮也始终可点，便于鼠标/触屏操作）
+const messagesEl = document.getElementById('messages');
+messagesEl.addEventListener('scroll', () => {
+  const h = state.history;
+  if (!h || !h.hasMore || h.loading) return;
+  if (messagesEl.scrollTop <= HISTORY_AUTO_LOAD_PX) loadOlderHistory();
+}, { passive: true });
+
+// 标签页重新可见时立即补一次，避免后台期间漏掉事件
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && state.voiceRecording) stopVoiceRecording(true);
+  if (!document.hidden && state.currentSessionId) pollSession(state.currentSessionId);
+});
+
+(async function boot() {
+  if (!BASE) {
+    document.getElementById('taskList').innerHTML = '<div class="empty">请先添加或导入 DSH 主机</div>';
+    renderHostSelect();
+    openHostModal();
+    return;
+  }
+  await checkConn(); 
+  await loadTasks(); 
+  await loadWorkspaces();
+  loadSpeechCatalog(true);
+  
+  state.refreshTimer = setInterval(async () => { await checkConn(); await loadTasks(); }, 5000);
+  setInterval(() => loadWorkspaces(), 30000);
+})();
+</script>
+</body>
+</html>
