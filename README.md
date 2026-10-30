@@ -10,6 +10,8 @@
 - 内置隧道客户端，无需额外部署 frp / ngrok
 - 附带单文件调试页 `dsh-proxy-hosts.html` 与 **Android 多主机管理应用 `DSH-Hosts`**
 
+🔗 **在线体验**：<http://cases.html.dtns.top/dsh-proxy-hosts.html> —— 浏览器直接当 DSH-Hosts 客户端用，本机跑起 `dsh-bridge` 后填入地址即可连接（演示页不含任何服务端数据）。
+
 ---
 
 ## 1. 它解决什么问题
@@ -167,6 +169,8 @@ release/  Android 应用安装包（DSH-Hosts.apk）
 
 `dsh-proxy-hosts.html` 是随项目分发的单文件调试页，直接用浏览器打开即可（静态文件仅此一个随仓库发布）。
 
+也可以直接用线上版本 <http://cases.html.dtns.top/dsh-proxy-hosts.html>，与仓库内文件功能相同：在页面里填上 `dsh-bridge` 的地址与端口，即可查看任务、会话、工作区和事件流。
+
 ## 13. 安全说明
 
 - 服务默认只绑定本机回环地址，请勿在无鉴权的情况下直接暴露到公网。
@@ -177,3 +181,6 @@ release/  Android 应用安装包（DSH-Hosts.apk）
 ## 14. 许可证
 
 [GPL-3.0](LICENSE)
+
+- 仓库：https://github.com/dtnsman/dsh-bridge ｜ https://gitee.com/dtnsman/dsh-bridge
+- 在线体验：http://cases.html.dtns.top/dsh-proxy-hosts.html
